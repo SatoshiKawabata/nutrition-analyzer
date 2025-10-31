@@ -1,9 +1,6 @@
 -- 日本食品標準成分表（八訂・増補 2023）データベース スキーマ
 -- Supabase/PostgreSQL 15 を想定
 
--- uuid_generate_v4 を使う場合のみ
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 SET search_path = public;
 
 -- 更新日時を自動更新する共通トリガー
@@ -18,7 +15,7 @@ END;
 $$;
 
 CREATE TABLE data_sources (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   title text NOT NULL,
   file_name text NOT NULL,
   publish_date date,
@@ -32,7 +29,7 @@ CREATE TRIGGER trg_data_sources_updated_at
   EXECUTE PROCEDURE set_timestamptz_updated_at();
 
 CREATE TABLE food_groups (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   data_source_id uuid NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
   group_code text NOT NULL,
   name_jp text NOT NULL,
@@ -48,7 +45,7 @@ CREATE TRIGGER trg_food_groups_updated_at
   EXECUTE PROCEDURE set_timestamptz_updated_at();
 
 CREATE TABLE foods (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   data_source_id uuid NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
   food_code text NOT NULL,
   index_code text NOT NULL,
@@ -70,7 +67,7 @@ CREATE TRIGGER trg_foods_updated_at
   EXECUTE PROCEDURE set_timestamptz_updated_at();
 
 CREATE TABLE raw_snapshots (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   data_source_id uuid NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
   food_id uuid NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
   payload jsonb NOT NULL,
@@ -85,7 +82,7 @@ CREATE TRIGGER trg_raw_snapshots_updated_at
   EXECUTE PROCEDURE set_timestamptz_updated_at();
 
 CREATE TABLE nutrient_components (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   data_source_id uuid NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
   component_code text NOT NULL,
   group_1_name_ja text NOT NULL,
@@ -110,7 +107,7 @@ CREATE TRIGGER trg_nutrient_components_updated_at
   EXECUTE PROCEDURE set_timestamptz_updated_at();
 
 CREATE TABLE value_annotation_defs (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   data_source_id uuid NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
   symbol text NOT NULL,
   meaning text NOT NULL,
@@ -126,7 +123,7 @@ CREATE TRIGGER trg_value_annotation_defs_updated_at
   EXECUTE PROCEDURE set_timestamptz_updated_at();
 
 CREATE TABLE food_nutrient_values (
-  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   data_source_id uuid NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
   food_id uuid NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
   component_id uuid NOT NULL REFERENCES nutrient_components(id) ON DELETE CASCADE,
