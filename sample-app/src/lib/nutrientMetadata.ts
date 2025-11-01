@@ -31,37 +31,41 @@ export function buildColumnDefinitions(components: NutrientComponent[]): ColumnD
     {
       key: 'food-search',
       kind: 'info',
-      titles: ['食品群', null, null],
+      titles: [null, '食品群', null],
       width: 220
     },
     {
       key: 'food-code',
       kind: 'info',
-      titles: ['食品番号', null, null],
+      titles: [null, '食品番号', null],
       width: 120
     },
     {
       key: 'index-code',
       kind: 'info',
-      titles: ['索引番号', null, null],
+      titles: [null, '索引番号', null],
       width: 120
     },
     {
       key: 'food-name',
       kind: 'info',
-      titles: ['可食部100g当たり', '食品名', null],
+      titles: [null, '食品名', null],
       width: 260
     },
     {
       key: 'quantity',
       kind: 'quantity',
-      titles: ['可食部100g当たり', '重量 (g)', null],
+      titles: [null, '重量 (g)', null],
       width: 120
     }
   ];
 
   const nutrientColumns: ColumnDefinition[] = components.map((component) => {
-    const level2 = component.group1NameJa ?? null;
+    const baseLevel2 = component.group1NameJa ?? null;
+    const level2 =
+      component.unit && baseLevel2
+        ? `${baseLevel2} (${component.unit})`
+        : baseLevel2 ?? (component.unit ? `(${component.unit})` : null);
     let level3: string | null = null;
 
     if (component.group3NameJa) {
@@ -77,7 +81,7 @@ export function buildColumnDefinitions(components: NutrientComponent[]): ColumnD
     return {
       key: `nutrient-${component.id}`,
       kind: 'nutrient',
-      titles: ['可食部100g当たり', level2, level3],
+      titles: [null, level2, level3],
       componentId: component.id,
       unit: component.unit
     };
@@ -86,7 +90,7 @@ export function buildColumnDefinitions(components: NutrientComponent[]): ColumnD
   const remarksColumn: ColumnDefinition = {
     key: 'remarks',
     kind: 'info',
-    titles: ['備考', null, null],
+    titles: [null, '備考', null],
     width: 240
   };
 
