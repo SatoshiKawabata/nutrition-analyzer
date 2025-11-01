@@ -180,7 +180,6 @@ button {
   color: #dc2626;
 }
 
-
 .nutrition-table__remove-inline {
   width: 24px;
   height: 24px;
@@ -265,7 +264,7 @@ button {
   position: fixed;
   list-style: none;
   margin: 0;
-  padding: 4px;
+  padding: 6px;
   border: 1px solid #cbd5f5;
   border-radius: 8px;
   background: #ffffff;
@@ -273,6 +272,7 @@ button {
   max-height: 280px;
   overflow-y: auto;
   z-index: 999;
+  min-width: 600px;
 }
 
 .food-suggest li {
