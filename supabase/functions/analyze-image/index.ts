@@ -9,6 +9,13 @@ type FoodRecord = {
   name_jp: string;
   remarks: string | null;
   food_code: string | null;
+  index_code: string | null;
+  group_id: string;
+  food_group: {
+    name_jp: string;
+    group_code: string;
+    original_sort_order: number;
+  };
 };
 
 const RESPONSE_HEADERS = {
@@ -89,8 +96,22 @@ async function fetchFoods(): Promise<FoodRecord[]> {
   console.log("[DEBUG] foodsテーブルからデータを取得中...");
   const { data, error } = await supabase
     .from("foods")
-    .select("id, name_jp, remarks, food_code")
-    .limit(120);
+    .select(`
+      id,
+      name_jp,
+      remarks,
+      food_code,
+      index_code,
+      group_id,
+      food_groups!inner(
+        name_jp,
+        group_code,
+        original_sort_order
+      )
+    `)
+    .order("food_groups.original_sort_order", { ascending: true })
+    .order("name_jp", { ascending: true })
+    .limit(3000);
 
   if (error) {
     console.error("[ERROR] プロンプト用の食品リスト取得に失敗しました:", error);
@@ -104,6 +125,12 @@ async function fetchFoods(): Promise<FoodRecord[]> {
         )
       }...`,
     );
+    
+    // DNS解決エラーなどのネットワークエラーの場合
+    if (error.message && error.message.includes("dns error")) {
+      console.error("[ERROR] DNS解決エラー: ネットワーク接続またはSupabase URLを確認してください");
+    }
+    
     return [];
   }
 
@@ -116,42 +143,139 @@ async function fetchFoods(): Promise<FoodRecord[]> {
       data.slice(0, 3).map((f) => f.name_jp),
     );
   }
-  return data ?? [];
+  
+  // 1件の食品は必ず1つの食品群に属するため（多対1の関係）、単一オブジェクトとして返される
+  // ただし、Supabaseの型定義が配列として推論される可能性があるため、型アサーションを使用
+  const normalizedData: FoodRecord[] = (data ?? []).map((item: any) => {
+    // 実際には単一オブジェクトとして返されるが、型定義の都合で配列として扱われる可能性がある
+    const foodGroup = Array.isArray(item.food_groups) 
+      ? item.food_groups[0] 
+      : item.food_groups;
+    
+    return {
+      id: item.id,
+      name_jp: item.name_jp,
+      remarks: item.remarks,
+      food_code: item.food_code,
+      index_code: item.index_code,
+      group_id: item.group_id,
+      food_group: foodGroup,
+    };
+  });
+  
+  return normalizedData;
+}
+
+// 食品群ごとにグループ化する関数
+function groupFoodsByCategory(foods: FoodRecord[]): Record<string, FoodRecord[]> {
+  const grouped: Record<string, FoodRecord[]> = {};
+  for (const food of foods) {
+    const groupName = food.food_group.name_jp;
+    if (!grouped[groupName]) {
+      grouped[groupName] = [];
+    }
+    grouped[groupName].push(food);
+  }
+  return grouped;
 }
 
 function buildPrompt(foods: FoodRecord[]): string {
-  const payload = {
-    foods: foods.map((food) => ({
-      id: food.id,
-      name_jp: food.name_jp,
-      food_code: food.food_code,
-      remarks: food.remarks,
-    })),
-    instructions: {
-      goal:
-        "入力画像に写っている食品をリストから特定し、それぞれのおおよその重量(g)を推定してください。リストに無い食品は無理に推定しなくて構いません。",
-      return_format: {
-        type: "json",
-        schema: [
-          {
-            foodId: "string (foods[].id)",
-            nameJp: "string",
-            weightGrams: "number",
-            confidence: "0.0-1.0",
-            notes: "optional string",
-          },
-        ],
-      },
-      rules: [
-        "必ず JSON のみを返してください。プレーンテキストや説明は含めないでください。",
-        "候補が無い場合は空配列 [] を返してください。",
-        "重量は g 単位で一つの数値として回答してください。",
-        "食品リストの備考欄が役立つ場合は参照して構いません。",
-      ],
-    },
-  };
+  // 食品群ごとにグループ化
+  const groupedFoods = groupFoodsByCategory(foods);
+  
+  // 食品群ごとにテキスト形式で整理
+  const foodsByGroup = Object.entries(groupedFoods)
+    .sort(([a], [b]) => {
+      // 食品群の順序を保持（original_sort_orderでソート済みのはず）
+      const orderA = foods.find(f => f.food_group.name_jp === a)?.food_group.original_sort_order ?? 999;
+      const orderB = foods.find(f => f.food_group.name_jp === b)?.food_group.original_sort_order ?? 999;
+      return orderA - orderB;
+    })
+    .map(([groupName, groupFoods]) => {
+      const foodList = groupFoods.map(food => {
+        let item = `- ${food.name_jp} (ID: ${food.id})`;
+        if (food.remarks) {
+          item += ` [備考: ${food.remarks}]`;
+        }
+        return item;
+      }).join('\n');
+      
+      return `## ${groupName}\n${foodList}`;
+    }).join('\n\n');
 
-  return JSON.stringify(payload);
+  // IDマッピング用のリスト（検索用）
+  // 現在は未使用だが、将来的にAIが検索しやすい形式で提供する可能性があるため残す
+  // const foodIdMap = foods.map(food => ({
+  //   id: food.id,
+  //   name_jp: food.name_jp,
+  //   group: food.food_group.name_jp,
+  //   food_code: food.food_code,
+  //   index_code: food.index_code,
+  //   remarks: food.remarks,
+  // }));
+
+  const prompt = `あなたは食事画像から食品を特定し、重量を推定する専門家です。
+
+## タスク
+入力画像に写っている食品を以下のリストから特定し、それぞれのおおよその重量(g)を推定してください。
+
+## 食品リスト（食品群ごとに分類）
+
+${foodsByGroup}
+
+## 重量推定のガイダンス
+
+### 重量推定の基準
+- **視覚的なサイズ比較**: 一般的なサイズ感を参考にしてください
+  - 小さな茶碗1杯のご飯: 約100-120g
+  - 中くらいの食パン1枚: 約30-35g
+  - 卵1個: 約50-60g
+  - ミニトマト1個: 約10-15g
+  - リンゴ1個（中くらい）: 約200-250g
+  - 鶏もも肉1枚: 約150-200g
+  - サラダ用レタス1枚: 約10-15g
+
+- **容器のサイズ**: 皿やボウルのサイズから全体量を推定
+- **調理状態**: 生の状態を基準に、調理後の見た目から生の重量を逆算
+- **一般的な1人前**: 日本の一般的な食事の1人前のサイズ感を参考に
+
+### 確信度の評価基準
+- **0.9-1.0**: 非常に確信がある（食品名が明確で、サイズもはっきり識別できる）
+- **0.7-0.89**: かなり確信がある（食品名は特定できるが、重量には多少の不確実性がある）
+- **0.5-0.69**: やや確信がある（食品名または重量のどちらかに不確実性がある）
+- **0.3-0.49**: 低い確信（推測の要素が大きい）
+- **0.0-0.29**: 非常に低い確信（使用しないでください）
+
+### 重要なルール
+1. **リストにない食品は無理に推定しない**: リストに完全に一致する食品がない場合は、空配列 [] を返してください
+2. **類似食品の扱い**: 食品名が完全一致しなくても、見た目や特徴が近い場合は最も近い食品を選択してください（例: 「白米」→「精白米」）
+3. **複数の食品が写っている場合**: すべての食品を検出し、それぞれの重量を推定してください
+4. **重量の単位**: 必ず g（グラム）単位で数値を返してください（小数点以下は可）
+5. **備考欄の活用**: 食品リストの備考欄に重要な情報がある場合は必ず参照してください
+
+## 出力形式
+以下のJSON形式で返してください：
+
+\`\`\`json
+{
+  "detections": [
+    {
+      "foodId": "食品のID（上記リストから選択）",
+      "nameJp": "食品名（リストに記載されている正確な名前）",
+      "weightGrams": 重量の数値（g単位）,
+      "confidence": 0.0-1.0の数値,
+      "notes": "任意の補足情報（推定根拠や注意点など）"
+    }
+  ]
+}
+\`\`\`
+
+候補が見つからない場合は、空配列を返してください: \`{"detections": []}\`
+
+必ずJSONのみを返し、プレーンテキストや説明は含めないでください。`;
+
+  console.log("prompt",prompt)
+  return prompt;
 }
 
 serve(async (req) => {
@@ -231,6 +355,20 @@ serve(async (req) => {
       `[DEBUG] データベースから ${foods.length} 件の食品を取得しました`,
     );
 
+    // 食品リストが空の場合はエラーを返す
+    if (foods.length === 0) {
+      console.error("[ERROR] 食品リストが空です。データベース接続を確認してください。");
+      return new Response(
+        JSON.stringify({
+          error: "食品データの取得に失敗しました。データベース接続を確認してください。",
+        }),
+        {
+          status: 503,
+          headers: { ...RESPONSE_HEADERS, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     const prompt = buildPrompt(foods);
     console.log(`[DEBUG] プロンプト長: ${prompt.length} 文字`);
 
@@ -252,12 +390,11 @@ serve(async (req) => {
       {
         role: "system",
         content:
-          "You are an assistant that analyses meal images. Respond strictly in JSON that follows the provided schema.",
+          "あなたは食事画像から食品を特定し、重量を推定する専門家です。画像を詳細に分析し、提供された食品リストから最も適切な食品を選択し、視覚的な手がかり（サイズ、容器、一般的なサイズ感など）を基に重量を推定してください。確信度は、食品の識別精度と重量推定の確実性に基づいて評価してください。結果は必ず指定されたJSON形式で返してください。",
       },
       {
         role: "user",
         content: [
-          { type: "text", text: "食品候補リストと指示:" },
           { type: "text", text: prompt },
           {
             type: "image",
@@ -278,32 +415,13 @@ serve(async (req) => {
     console.log(`[DEBUG] OpenAI APIレスポンス受信: ${elapsedTime}ms`);
     console.log(`[DEBUG] AI生レスポンス:`, JSON.stringify(object, null, 2));
 
-    console.log("[DEBUG] AIレスポンスをスキーマに対して検証中...");
-    const parsed = responseSchema.safeParse(object);
-    if (!parsed.success) {
-      console.error(
-        "[ERROR] AIレスポンスのパースに失敗しました:",
-        parsed.error,
-      );
-      console.error("[ERROR] スキーマ検証エラー:", parsed.error.errors);
-      return new Response(
-        JSON.stringify({
-          detections: [],
-          error: "AIレスポンスを解析できませんでした",
-        }),
-        {
-          status: 502,
-          headers: { ...RESPONSE_HEADERS, "Content-Type": "application/json" },
-        },
-      );
-    }
-
+    // generateObjectは自動でスキーマ検証を行うため、手動検証は不要
     console.log(
-      `[DEBUG] AIレスポンスから ${parsed.data.detections.length} 件の検出結果をパースしました`,
+      `[DEBUG] AIレスポンスから ${object.detections.length} 件の検出結果を取得しました`,
     );
 
     const idSet = new Set(foods.map((food) => food.id));
-    const detections = parsed.data.detections
+    const detections = object.detections
       .filter((item) => idSet.has(item.foodId))
       .map((item) => ({
         foodId: item.foodId,
@@ -313,7 +431,7 @@ serve(async (req) => {
         notes: item.notes ?? null,
       }));
 
-    const filteredCount = parsed.data.detections.length - detections.length;
+    const filteredCount = object.detections.length - detections.length;
     if (filteredCount > 0) {
       console.warn(
         `[WARN] 無効な食品IDを持つ ${filteredCount} 件の検出結果をフィルタリングしました`,
@@ -333,10 +451,28 @@ serve(async (req) => {
       `[ERROR] エラースタック:`,
       error instanceof Error ? error.stack : "スタックトレースなし",
     );
+    
+    // エラーの種類に応じた詳細なメッセージ
+    let errorMessage = "予期しないエラーが発生しました";
+    let statusCode = 500;
+    
+    if (error instanceof Error) {
+      if (error.message.includes("dns error")) {
+        errorMessage = "ネットワーク接続エラーが発生しました。外部サービスの接続を確認してください。";
+        statusCode = 503;
+      } else if (error.message.includes("OpenAI")) {
+        errorMessage = "AIサービスの接続に失敗しました。APIキーとネットワーク接続を確認してください。";
+        statusCode = 503;
+      } else if (error.message.includes("Supabase")) {
+        errorMessage = "データベース接続に失敗しました。Supabaseの設定を確認してください。";
+        statusCode = 503;
+      }
+    }
+    
     return new Response(
-      JSON.stringify({ error: "予期しないエラーが発生しました" }),
+      JSON.stringify({ error: errorMessage }),
       {
-        status: 500,
+        status: statusCode,
         headers: { ...RESPONSE_HEADERS, "Content-Type": "application/json" },
       },
     );
