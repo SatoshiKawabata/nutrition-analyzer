@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "allowJs": false,
+    "lib": ["deno.window"],
+    "strict": true
+  },
+  "imports": {
+    "@ai-sdk/openai": "npm:@ai-sdk/openai@2.0.59",
+    "ai": "npm:ai@5.0.86",
+    "zod": "npm:zod@3.25.76",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.45.0"
+  }
+}

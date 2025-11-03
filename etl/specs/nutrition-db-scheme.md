@@ -3,7 +3,8 @@
 ## 背景と目的
 
 - データソース: csv
-- 目的: Supabase上で分析・アプリ利用しやすい正規化スキーマを構築し、更新差分の取り込みと注記管理を容易にする
+- 目的:
+  Supabase上で分析・アプリ利用しやすい正規化スキーマを構築し、更新差分の取り込みと注記管理を容易にする
 
 ## ER 図（候補スキーマ）
 
@@ -132,19 +133,19 @@ erDiagram
 
 ### foods
 
-| 列名           | データ型    | 制約                         | 役割・内容                    | 元データ参照     |
-| -------------- | ----------- | ---------------------------- | ----------------------------- | ---------------- |
-| id             | UUID        | PK, NOT NULL                 | 食品行識別子                  | システム生成     |
-| data_source_id | UUID        | FK→data_sources.id, NOT NULL | 参照データセット              | 投入時           |
-| food_code      | TEXT        | NOT NULL                     | 食品番号                      | 表全体 B 列      |
-| (UNIQUE)       |             |                              | `(data_source_id, food_code)` |                  |
-| index_code     | TEXT        | NULL 可                      | 索引番号                      | 表全体 C 列      |
-| group_id       | UUID        | FK→food_groups.id, NOT NULL  | 所属食品群                    | A 列と連動       |
-| name_jp        | TEXT        | NOT NULL                     | 食品名                        | 表全体 D 列      |
-| waste_rate     | NUMERIC     | NULL 可                      | 廃棄率                        | 表全体 E 列      |
-| remarks        | TEXT        | NULL 可                      | 備考                          | 表全体 BJ 列     |
-| created_at     | TIMESTAMPTZ | NOT NULL                     | 作成日時                      | システム生成     |
-| updated_at     | TIMESTAMPTZ | NOT NULL                     | 更新日時                      | システム生成     |
+| 列名           | データ型    | 制約                         | 役割・内容                    | 元データ参照 |
+| -------------- | ----------- | ---------------------------- | ----------------------------- | ------------ |
+| id             | UUID        | PK, NOT NULL                 | 食品行識別子                  | システム生成 |
+| data_source_id | UUID        | FK→data_sources.id, NOT NULL | 参照データセット              | 投入時       |
+| food_code      | TEXT        | NOT NULL                     | 食品番号                      | 表全体 B 列  |
+| (UNIQUE)       |             |                              | `(data_source_id, food_code)` |              |
+| index_code     | TEXT        | NULL 可                      | 索引番号                      | 表全体 C 列  |
+| group_id       | UUID        | FK→food_groups.id, NOT NULL  | 所属食品群                    | A 列と連動   |
+| name_jp        | TEXT        | NOT NULL                     | 食品名                        | 表全体 D 列  |
+| waste_rate     | NUMERIC     | NULL 可                      | 廃棄率                        | 表全体 E 列  |
+| remarks        | TEXT        | NULL 可                      | 備考                          | 表全体 BJ 列 |
+| created_at     | TIMESTAMPTZ | NOT NULL                     | 作成日時                      | システム生成 |
+| updated_at     | TIMESTAMPTZ | NOT NULL                     | 更新日時                      | システム生成 |
 
 ### nutrient_components
 
@@ -198,12 +199,12 @@ erDiagram
 
 ### raw_snapshots
 
-| 列名           | データ型    | 制約                         | 役割・内容                                   | 元データ参照        |
-| -------------- | ----------- | ---------------------------- | -------------------------------------------- | ------------------- |
-| id             | UUID        | PK, NOT NULL                 | スナップショット識別子                       | システム生成        |
-| data_source_id | UUID        | FK→data_sources.id, NOT NULL | 参照データセット                             | 投入時              |
-| food_id        | UUID        | FK→foods.id, NOT NULL        | 対象食品                                     | 投入時              |
-| payload        | JSONB       | NOT NULL                     | 元行情報（食品コード・値・注記等を含む JSON）| 取り込み時に生成    |
-| created_at     | TIMESTAMPTZ | NOT NULL                     | 作成日時                                     | システム生成        |
-| updated_at     | TIMESTAMPTZ | NOT NULL                     | 更新日時                                     | システム生成        |
-| (UNIQUE)       |             |                              | `food_id`                                    | 1食品1スナップ      |
+| 列名           | データ型    | 制約                         | 役割・内容                                    | 元データ参照     |
+| -------------- | ----------- | ---------------------------- | --------------------------------------------- | ---------------- |
+| id             | UUID        | PK, NOT NULL                 | スナップショット識別子                        | システム生成     |
+| data_source_id | UUID        | FK→data_sources.id, NOT NULL | 参照データセット                              | 投入時           |
+| food_id        | UUID        | FK→foods.id, NOT NULL        | 対象食品                                      | 投入時           |
+| payload        | JSONB       | NOT NULL                     | 元行情報（食品コード・値・注記等を含む JSON） | 取り込み時に生成 |
+| created_at     | TIMESTAMPTZ | NOT NULL                     | 作成日時                                      | システム生成     |
+| updated_at     | TIMESTAMPTZ | NOT NULL                     | 更新日時                                      | システム生成     |
+| (UNIQUE)       |             |                              | `food_id`                                     | 1食品1スナップ   |

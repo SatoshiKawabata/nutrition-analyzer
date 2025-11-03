@@ -1,6 +1,7 @@
 # analyze-image Function
 
-画像をアップロードして、写っている食品を特定し、重量を推定する Supabase Edge Function です。
+画像をアップロードして、写っている食品を特定し、重量を推定する Supabase Edge
+Function です。
 
 ## ローカルでの動作確認方法
 
@@ -47,9 +48,13 @@ SUPABASE_URL=http://127.0.0.1:54321
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
-**注意**: `.env`ファイルは`.gitignore`に含まれているため、Git にはコミットされません。
+**注意**: `.env`ファイルは`.gitignore`に含まれているため、Git
+にはコミットされません。
 
-**重要**: `SUPABASE_`で始まる環境変数（`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`など）は、Supabase CLI が自動的にスキップします。これらはローカル環境では`supabase start`で自動設定されるため、`.env`ファイルには含めないでください（`.env`ファイルには`OPENAI_API_KEY`のみを含めてください）。
+**重要**:
+`SUPABASE_`で始まる環境変数（`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`など）は、Supabase
+CLI
+が自動的にスキップします。これらはローカル環境では`supabase start`で自動設定されるため、`.env`ファイルには含めないでください（`.env`ファイルには`OPENAI_API_KEY`のみを含めてください）。
 
 ### 2. Supabase データベースへの接続設定
 
@@ -70,7 +75,8 @@ supabase status
 
 #### リモート環境を使用する場合（ローカルで Function を起動）
 
-ローカルで Function を起動しつつ、リモートの Supabase データベースに接続する場合：
+ローカルで Function を起動しつつ、リモートの Supabase
+データベースに接続する場合：
 
 1. **リモート環境の URL と Service Role Key を取得**
 
@@ -99,7 +105,8 @@ export SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 supabase functions serve analyze-image --no-verify-jwt --env-file .env
 ```
 
-**注意**: `SUPABASE_`で始まる環境変数は`--env-file`オプションでスキップされるため、以下のいずれかの方法を使用してください。
+**注意**:
+`SUPABASE_`で始まる環境変数は`--env-file`オプションでスキップされるため、以下のいずれかの方法を使用してください。
 
 **方法 A: 環境変数として直接設定（推奨）**
 
@@ -146,7 +153,8 @@ export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 supabase functions serve analyze-image --no-verify-jwt
 ```
 
-**注意**: `export`で設定した環境変数は、`supabase functions serve`実行時に Edge Runtime に渡されない場合があります。`--env-file`オプションの使用を推奨します。
+**注意**: `export`で設定した環境変数は、`supabase functions serve`実行時に Edge
+Runtime に渡されない場合があります。`--env-file`オプションの使用を推奨します。
 
 ### トラブルシューティング
 

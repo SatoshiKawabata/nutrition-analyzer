@@ -29,6 +29,7 @@ Functionを実行した際のログで以下を確認：
 #### ローカル環境で自動設定される環境変数
 
 ローカル環境では、Supabase CLIが自動的に以下を設定します：
+
 - `SUPABASE_URL`: `http://kong:8000` （コンテナ内部から見たURL）
 - `SUPABASE_SERVICE_ROLE_KEY`: ローカル環境のService Role Key
 
@@ -36,7 +37,8 @@ Functionを実行した際のログで以下を確認：
 
 ### 2. リモート環境の場合
 
-リモート環境を使用している場合は、正しいURLとService Role Keyを設定する必要があります：
+リモート環境を使用している場合は、正しいURLとService Role
+Keyを設定する必要があります：
 
 ```bash
 # リモート環境のURLとKeyを確認
@@ -49,6 +51,7 @@ supabase projects api-keys --project-ref YOUR_PROJECT_REF
 #### 方法1: ログで確認
 
 Functionを実行して、ログに表示される以下を確認：
+
 - `[DEBUG] Supabase URL:` - 実際に使用されているURL
 - `[DEBUG] Service Role Key（最初の20文字）:` - 実際に使用されているKey
 
@@ -70,9 +73,11 @@ SELECT COUNT(*) FROM foods;
 
 **症状**: ログに `http://kong:8000` と表示されるが、データが取得できない
 
-**原因**: Edge Functionがコンテナ内部から見たURLを使っているが、実際のデータベースに接続できていない
+**原因**: Edge
+Functionがコンテナ内部から見たURLを使っているが、実際のデータベースに接続できていない
 
-**解決方法**: 
+**解決方法**:
+
 - ローカル環境では `http://127.0.0.1:54321` を使用する必要がある場合があります
 - または、Supabase CLIが自動設定する環境変数を確認
 
@@ -80,7 +85,8 @@ SELECT COUNT(*) FROM foods;
 
 **症状**: 認証エラーが発生する
 
-**解決方法**: 
+**解決方法**:
+
 - `supabase status` で正しいService Role Keyを確認
 - Edge Functionのログで実際に使用されているKeyを確認
 
@@ -89,6 +95,7 @@ SELECT COUNT(*) FROM foods;
 **症状**: ローカル環境を起動しているのに、リモート環境のURLを使っている
 
 **解決方法**:
+
 - ローカル環境を使う場合: `supabase start` を実行して、ローカル環境のURLを使用
 - リモート環境を使う場合: リモート環境のURLとService Role Keyを正しく設定
 
@@ -102,4 +109,3 @@ SELECT COUNT(*) FROM foods;
 - 取得した食品の例（最初の3件）
 
 これらを確認して、接続先が正しいか判断してください。
-
