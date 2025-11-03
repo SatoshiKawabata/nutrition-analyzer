@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>analyze-image Function テスト</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        max-width: 800px;
+        margin: 50px auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #333;
+        margin-bottom: 10px;
+      }
+      .subtitle {
+        color: #666;
+        margin-bottom: 30px;
+      }
+      .form-group {
+        margin-bottom: 20px;
+      }
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: #333;
+      }
+      input[type="file"] {
+        width: 100%;
+        padding: 10px;
+        border: 2px dashed #ddd;
+        border-radius: 4px;
+        background: #fafafa;
+        cursor: pointer;
+      }
+      input[type="text"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+      button {
+        background: #3b82f6;
+        color: white;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 4px;
+        font-size: 16px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      button:hover {
+        background: #2563eb;
+      }
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .preview {
+        margin-top: 20px;
+        text-align: center;
+      }
+      .preview img {
+        max-width: 100%;
+        max-height: 400px;
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+      .result {
+        margin-top: 30px;
+        padding: 20px;
+        background: #f9fafb;
+        border-radius: 4px;
+        border-left: 4px solid #3b82f6;
+      }
+      .result h3 {
+        margin-top: 0;
+        color: #333;
+      }
+      .detection {
+        background: white;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 4px;
+        border: 1px solid #e5e7eb;
+      }
+      .detection-name {
+        font-weight: 600;
+        font-size: 18px;
+        color: #111;
+        margin-bottom: 8px;
+      }
+      .detection-details {
+        color: #666;
+        font-size: 14px;
+      }
+      .error {
+        background: #fee;
+        border-left-color: #ef4444;
+        color: #991b1b;
+      }
+      .loading {
+        text-align: center;
+        padding: 20px;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🍽️ 食品画像解析テスト</h1>
+      <p class="subtitle">画像をアップロードして、写っている食品を特定します</p>
+
+      <form id="uploadForm">
+        <div class="form-group">
+          <label for="apiUrl">Function URL:</label>
+          <input
+            type="text"
+            id="apiUrl"
+            value="http://localhost:54321/functions/v1/analyze-image"
+            placeholder="http://localhost:54321/functions/v1/analyze-image"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="imageFile">画像ファイルを選択:</label>
+          <input type="file" id="imageFile" accept="image/*" required />
+        </div>
+
+        <div class="preview" id="preview"></div>
+
+        <button type="submit" id="submitBtn">解析する</button>
+      </form>
+
+      <div id="result"></div>
+    </div>
+
+    <script>
+      const imageFileInput = document.getElementById("imageFile");
+      const preview = document.getElementById("preview");
+      const form = document.getElementById("uploadForm");
+      const result = document.getElementById("result");
+      const submitBtn = document.getElementById("submitBtn");
+
+      // 画像プレビュー
+      imageFileInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            preview.innerHTML = `<img src="${event.target.result}" alt="Preview">`;
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+
+      // フォーム送信
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const file = imageFileInput.files[0];
+        const apiUrl = document.getElementById("apiUrl").value;
+
+        if (!file) {
+          alert("画像ファイルを選択してください");
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("image", file);
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = "解析中...";
+        result.innerHTML =
+          '<div class="loading">解析中です... しばらくお待ちください</div>';
+
+        try {
+          const response = await fetch(apiUrl, {
+            method: "POST",
+            body: formData,
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "エラーが発生しました");
+          }
+
+          displayResult(data);
+        } catch (error) {
+          result.innerHTML = `
+          <div class="result error">
+            <h3>エラー</h3>
+            <p>${error.message}</p>
+            <p style="font-size: 12px; margin-top: 10px;">Functionが起動しているか確認してください</p>
+          </div>
+        `;
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "解析する";
+        }
+      });
+
+      function displayResult(data) {
+        if (!data.detections || data.detections.length === 0) {
+          result.innerHTML = `
+          <div class="result">
+            <h3>結果</h3>
+            <p>検出された食品はありませんでした</p>
+          </div>
+        `;
+          return;
+        }
+
+        const detectionsHtml = data.detections
+          .map(
+            (detection) => `
+        <div class="detection">
+          <div class="detection-name">${detection.nameJp}</div>
+          <div class="detection-details">
+            重量: ${detection.weightGrams}g<br>
+            信頼度: ${(detection.confidence * 100).toFixed(1)}%<br>
+            ${detection.notes ? `備考: ${detection.notes}<br>` : ""}
+            ID: ${detection.foodId}
+          </div>
+        </div>
+      `
+          )
+          .join("");
+
+        result.innerHTML = `
+        <div class="result">
+          <h3>検出結果 (${data.detections.length}件)</h3>
+          ${detectionsHtml}
+        </div>
+      `;
+      }
+    </script>
+  </body>
+</html>
