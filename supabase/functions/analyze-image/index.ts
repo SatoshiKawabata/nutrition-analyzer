@@ -109,7 +109,6 @@ async function fetchFoods(): Promise<FoodRecord[]> {
         original_sort_order
       )
     `)
-    .order("food_groups.original_sort_order", { ascending: true })
     .order("name_jp", { ascending: true })
     .limit(3000);
 
@@ -161,6 +160,16 @@ async function fetchFoods(): Promise<FoodRecord[]> {
       group_id: item.group_id,
       food_group: foodGroup,
     };
+  });
+  
+  // 取得後に食品群の順序 → 食品名の順序でソート
+  normalizedData.sort((a, b) => {
+    const orderA = a.food_group.original_sort_order;
+    const orderB = b.food_group.original_sort_order;
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+    return a.name_jp.localeCompare(b.name_jp, "ja");
   });
   
   return normalizedData;
