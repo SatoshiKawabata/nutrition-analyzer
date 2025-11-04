@@ -94,58 +94,99 @@ async function fetchFoods(): Promise<FoodRecord[]> {
   });
 
   console.log("[DEBUG] foodsテーブルからデータを取得中...");
-  const { data, error } = await supabase
-    .from("foods")
-    .select(`
-      id,
-      name_jp,
-      remarks,
-      food_code,
-      index_code,
-      group_id,
-      food_groups!inner(
-        name_jp,
-        group_code,
-        original_sort_order
-      )
-    `)
-    .order("name_jp", { ascending: true })
-    .limit(3000);
+  
+  // max_rowsの制限（通常1000件）を回避するため、ページネーションで複数回取得
+  const PAGE_SIZE = 1000;
+  const MAX_FOODS = 3000;
+  let allData: any[] = [];
+  let offset = 0;
+  let hasMore = true;
 
-  if (error) {
-    console.error("[ERROR] プロンプト用の食品リスト取得に失敗しました:", error);
-    console.error("[ERROR] エラー詳細:", JSON.stringify(error, null, 2));
-    console.error(`[ERROR] 接続URL: ${supabaseUrl}`);
-    console.error(
-      `[ERROR] Service Role Key（最初の20文字）: ${
-        serviceRoleKey.substring(
-          0,
-          20,
+  while (hasMore && allData.length < MAX_FOODS) {
+    const limit = Math.min(PAGE_SIZE, MAX_FOODS - allData.length);
+    const { data, error } = await supabase
+      .from("foods")
+      .select(`
+        id,
+        name_jp,
+        remarks,
+        food_code,
+        index_code,
+        group_id,
+        food_groups!inner(
+          name_jp,
+          group_code,
+          original_sort_order
         )
-      }...`,
-    );
-    
-    // DNS解決エラーなどのネットワークエラーの場合
-    if (error.message && error.message.includes("dns error")) {
-      console.error("[ERROR] DNS解決エラー: ネットワーク接続またはSupabase URLを確認してください");
+      `)
+      .order("name_jp", { ascending: true })
+      .range(offset, offset + limit - 1);
+
+    if (error) {
+      console.error("[ERROR] プロンプト用の食品リスト取得に失敗しました:", error);
+      console.error("[ERROR] エラー詳細:", JSON.stringify(error, null, 2));
+      console.error(`[ERROR] 接続URL: ${supabaseUrl}`);
+      console.error(
+        `[ERROR] Service Role Key（最初の20文字）: ${
+          serviceRoleKey.substring(
+            0,
+            20,
+          )
+        }...`,
+      );
+      
+      // DNS解決エラーなどのネットワークエラーの場合
+      if (error.message && error.message.includes("dns error")) {
+        console.error("[ERROR] DNS解決エラー: ネットワーク接続またはSupabase URLを確認してください");
+      }
+      
+      // エラーが発生した場合、既に取得できたデータがあればそれを返す
+      if (allData.length > 0) {
+        console.warn(`[WARN] エラーが発生しましたが、既に取得した ${allData.length} 件のデータを使用します`);
+        break;
+      }
+      return [];
     }
+
+    if (!data || data.length === 0) {
+      hasMore = false;
+      break;
+    }
+
+    allData = allData.concat(data);
+    offset += data.length;
     
-    return [];
+    console.log(
+      `[DEBUG] ページネーション: ${allData.length} 件まで取得しました（今回: ${data.length} 件）`,
+    );
+
+    // 取得したデータが要求した件数より少ない場合は、これ以上データがない
+    if (data.length < limit) {
+      hasMore = false;
+    }
+
+    // 目標の件数に達した場合は終了
+    if (allData.length >= MAX_FOODS) {
+      hasMore = false;
+    }
   }
 
+  // 目標件数に達した場合、必要な分だけ使用
+  const finalData = allData.slice(0, MAX_FOODS);
+
   console.log(
-    `[DEBUG] データベースから ${data?.length ?? 0} 件の食品を取得しました`,
+    `[DEBUG] データベースから合計 ${finalData.length} 件の食品を取得しました`,
   );
-  if (data && data.length > 0) {
+  if (finalData.length > 0) {
     console.log(
       `[DEBUG] 取得した食品の例（最初の3件）:`,
-      data.slice(0, 3).map((f) => f.name_jp),
+      finalData.slice(0, 3).map((f) => f.name_jp),
     );
   }
   
   // 1件の食品は必ず1つの食品群に属するため（多対1の関係）、単一オブジェクトとして返される
   // ただし、Supabaseの型定義が配列として推論される可能性があるため、型アサーションを使用
-  const normalizedData: FoodRecord[] = (data ?? []).map((item: any) => {
+  const normalizedData: FoodRecord[] = finalData.map((item: any) => {
     // 実際には単一オブジェクトとして返されるが、型定義の都合で配列として扱われる可能性がある
     const foodGroup = Array.isArray(item.food_groups) 
       ? item.food_groups[0] 
@@ -283,7 +324,6 @@ ${foodsByGroup}
 
 必ずJSONのみを返し、プレーンテキストや説明は含めないでください。`;
 
-  console.log("prompt",prompt)
   return prompt;
 }
 
@@ -380,6 +420,13 @@ serve(async (req) => {
 
     const prompt = buildPrompt(foods);
     console.log(`[DEBUG] プロンプト長: ${prompt.length} 文字`);
+
+    // 環境変数 DEBUG_PROMPT が設定されている場合、プロンプト全体を出力
+    if (Deno.env.get("DEBUG_PROMPT") === "true") {
+      console.log("[DEBUG] ========== プロンプト内容（全体） ==========");
+      console.log(prompt);
+      console.log("[DEBUG] ==========================================");
+    }
 
     console.log("[DEBUG] 画像をbase64に変換中...");
     const arrayBuffer = await imageFile.arrayBuffer();
