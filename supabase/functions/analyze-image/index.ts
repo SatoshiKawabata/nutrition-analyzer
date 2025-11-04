@@ -243,11 +243,8 @@ function buildPrompt(foods: FoodRecord[]): string {
     })
     .map(([groupName, groupFoods]) => {
       const foodList = groupFoods.map(food => {
-        let item = `- ${food.name_jp} (ID: ${food.id})`;
-        if (food.remarks) {
-          item += ` [備考: ${food.remarks}]`;
-        }
-        return item;
+        // 備考を削除し、食品名とIDのみ表示
+        return `- ${food.name_jp} (ID: ${food.id})`;
       }).join('\n');
       
       return `## ${groupName}\n${foodList}`;
@@ -301,7 +298,6 @@ ${foodsByGroup}
 2. **類似食品の扱い**: 食品名が完全一致しなくても、見た目や特徴が近い場合は最も近い食品を選択してください（例: 「白米」→「精白米」）
 3. **複数の食品が写っている場合**: すべての食品を検出し、それぞれの重量を推定してください
 4. **重量の単位**: 必ず g（グラム）単位で数値を返してください（小数点以下は可）
-5. **備考欄の活用**: 食品リストの備考欄に重要な情報がある場合は必ず参照してください
 
 ## 出力形式
 以下のJSON形式で返してください：
@@ -420,13 +416,6 @@ serve(async (req) => {
 
     const prompt = buildPrompt(foods);
     console.log(`[DEBUG] プロンプト長: ${prompt.length} 文字`);
-
-    // 環境変数 DEBUG_PROMPT が設定されている場合、プロンプト全体を出力
-    if (Deno.env.get("DEBUG_PROMPT") === "true") {
-      console.log("[DEBUG] ========== プロンプト内容（全体） ==========");
-      console.log(prompt);
-      console.log("[DEBUG] ==========================================");
-    }
 
     console.log("[DEBUG] 画像をbase64に変換中...");
     const arrayBuffer = await imageFile.arrayBuffer();
