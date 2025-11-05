@@ -65,6 +65,136 @@ const responseSchema = z.object({
     .default([]),
 });
 
+// キーワード抽出用のスキーマ
+const keywordDetectionSchema = z.object({
+  keywords: z.array(z.string()).describe("画像から検出された食品名またはカテゴリ"),
+});
+
+// エンベディングを取得する関数
+async function getEmbedding(text: string): Promise<number[]> {
+  const response = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${openAiApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "text-embedding-3-small",
+      input: text,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`OpenAI Embeddings API error: ${response.status} ${error}`);
+  }
+
+  const data = await response.json();
+  return data.data[0].embedding;
+}
+
+// 第1段階: 画像から食品キーワードを抽出
+async function detectFoodKeywords(imageBase64: string): Promise<string[]> {
+  console.log("[DEBUG] 第1段階: 画像から食品キーワードを抽出中...");
+  
+  const { object } = await generateObject({
+    model: openai("gpt-4o-mini"),
+    schema: keywordDetectionSchema,
+    messages: [
+      {
+        role: "system",
+        content:
+          "画像に写っている食品を特定してください。具体的な食品名（例: ご飯、サケ、トマト）または食品カテゴリ（例: 穀類、魚介類、野菜類）をリストアップしてください。",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "image",
+            image: imageBase64,
+          },
+        ],
+      },
+    ],
+  });
+
+  console.log(`[DEBUG] 検出されたキーワード: ${object.keywords.join(", ")}`);
+  return object.keywords;
+}
+
+// 第2段階: エンベディングAPIで関連食品を検索
+async function searchFoodsByEmbedding(
+  keywords: string[],
+): Promise<FoodRecord[]> {
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.warn("[WARN] Supabase認証情報が不足しています");
+    return [];
+  }
+
+  if (keywords.length === 0) {
+    console.warn("[WARN] キーワードが空です");
+    return [];
+  }
+
+  console.log("[DEBUG] 第2段階: エンベディングAPIで関連食品を検索中...");
+  
+  try {
+    // キーワードを結合してエンベディング化
+    const queryText = keywords.join(" ");
+    const queryEmbedding = await getEmbedding(queryText);
+    console.log(`[DEBUG] クエリベクトル生成完了（次元数: ${queryEmbedding.length}）`);
+
+    // Supabase RPC関数でベクトル検索
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false },
+    });
+
+    const { data, error } = await supabase.rpc("search_foods_by_vector", {
+      query_embedding: queryEmbedding,
+      match_threshold: 0.7,
+      match_count: 200,
+    });
+
+    if (error) {
+      console.error("[ERROR] ベクトル検索エラー:", error);
+      return [];
+    }
+
+    if (!data || data.length === 0) {
+      console.warn("[WARN] ベクトル検索で結果が見つかりませんでした");
+      return [];
+    }
+
+    console.log(`[DEBUG] ベクトル検索結果: ${data.length} 件の食品が見つかりました`);
+
+    // 結果をFoodRecord形式に変換
+    const results: FoodRecord[] = data.map((item: any) => ({
+      id: item.id,
+      name_jp: item.name_jp,
+      remarks: item.remarks,
+      food_code: item.food_code,
+      index_code: item.index_code,
+      group_id: item.group_id,
+      food_group: item.food_group,
+    }));
+
+    // 食品群の順序 → 食品名の順序でソート
+    results.sort((a, b) => {
+      const orderA = a.food_group.original_sort_order;
+      const orderB = b.food_group.original_sort_order;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      return a.name_jp.localeCompare(b.name_jp, "ja");
+    });
+
+    return results;
+  } catch (error) {
+    console.error("[ERROR] エンベディング検索エラー:", error);
+    return [];
+  }
+}
+
 async function fetchFoods(): Promise<FoodRecord[]> {
   if (!supabaseUrl || !serviceRoleKey) {
     console.warn(
@@ -81,12 +211,7 @@ async function fetchFoods(): Promise<FoodRecord[]> {
 
   console.log(`[DEBUG] Supabaseに接続中: ${supabaseUrl}`);
   console.log(
-    `[DEBUG] Service Role Key（最初の20文字）: ${
-      serviceRoleKey.substring(
-        0,
-        20,
-      )
-    }...`,
+    `[DEBUG] Service Role Key: ${serviceRoleKey ? "***masked***" : "未設定"}`,
   );
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
@@ -126,14 +251,7 @@ async function fetchFoods(): Promise<FoodRecord[]> {
       console.error("[ERROR] プロンプト用の食品リスト取得に失敗しました:", error);
       console.error("[ERROR] エラー詳細:", JSON.stringify(error, null, 2));
       console.error(`[ERROR] 接続URL: ${supabaseUrl}`);
-      console.error(
-        `[ERROR] Service Role Key（最初の20文字）: ${
-          serviceRoleKey.substring(
-            0,
-            20,
-          )
-        }...`,
-      );
+      console.error(`[ERROR] Service Role Key: ${serviceRoleKey ? "***masked***" : "未設定"}`);
       
       // DNS解決エラーなどのネットワークエラーの場合
       if (error.message && error.message.includes("dns error")) {
@@ -394,10 +512,59 @@ serve(async (req) => {
       `[DEBUG] 画像ファイル受信: 名前=${imageFile.name}, サイズ=${imageFile.size} バイト, タイプ=${imageFile.type}`,
     );
 
-    console.log("[DEBUG] データベースから食品リストを取得中...");
-    const foods = await fetchFoods();
+    console.log("[DEBUG] 画像をbase64に変換中...");
+    const arrayBuffer = await imageFile.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    
+    // メモリ効率的なBase64変換（チャンク処理でメモリ使用量を抑制）
+    // 大きな画像でもメモリ効率的に処理できるよう、チャンクごとに変換
+    // String.fromCharCode.applyに大きな配列を渡すとスタックオーバーフローのリスクがあるため、
+    // 小さなチャンク（最大3KB）ごとに処理してメモリ使用量を抑制
+    const CHUNK_SIZE = 3072; // 3KBごとに処理（スタックオーバーフローを回避、btoaの引数制限も考慮）
+    let base64Image = "";
+    
+    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+      const chunk = bytes.slice(i, i + CHUNK_SIZE);
+      // チャンクごとに文字列変換してBase64化（メモリ効率的）
+      // 小さなチャンクなので、String.fromCharCode.applyでも安全
+      const chunkArray = Array.from(chunk);
+      const chunkString = String.fromCharCode.apply(null, chunkArray);
+      base64Image += btoa(chunkString);
+    }
+    const mimeType = imageFile.type || "image/jpeg";
+    const dataUrl = `data:${mimeType};base64,${base64Image}`;
     console.log(
-      `[DEBUG] データベースから ${foods.length} 件の食品を取得しました`,
+      `[DEBUG] 画像変換完了: base64長=${base64Image.length}, MIMEタイプ=${mimeType}`,
+    );
+
+    // RAGアプローチ: キーワード抽出 → エンベディング検索 → 重量推定
+    let foods: FoodRecord[] = [];
+    
+    try {
+      // 第1段階: 画像からキーワードを抽出
+      const keywords = await detectFoodKeywords(dataUrl);
+      
+      // 第2段階: エンベディングAPIで関連食品を検索
+      const relevantFoods = await searchFoodsByEmbedding(keywords);
+      
+      if (relevantFoods.length > 0) {
+        foods = relevantFoods;
+        console.log(
+          `[DEBUG] エンベディング検索成功: ${foods.length} 件の関連食品を取得しました`,
+        );
+      } else {
+        // フォールバック: エンベディング検索で結果がない場合、全食品を取得
+        console.warn("[WARN] エンベディング検索で結果が見つかりませんでした。全食品を取得します。");
+        foods = await fetchFoods();
+      }
+    } catch (error) {
+      // フォールバック: エンベディング検索が失敗した場合、全食品を取得
+      console.warn("[WARN] エンベディング検索失敗、フォールバック:", error);
+      foods = await fetchFoods();
+    }
+
+    console.log(
+      `[DEBUG] 使用する食品リスト: ${foods.length} 件`,
     );
 
     // 食品リストが空の場合はエラーを返す
@@ -416,20 +583,6 @@ serve(async (req) => {
 
     const prompt = buildPrompt(foods);
     console.log(`[DEBUG] プロンプト長: ${prompt.length} 文字`);
-
-    console.log("[DEBUG] 画像をbase64に変換中...");
-    const arrayBuffer = await imageFile.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    const base64Image = btoa(
-      Array.from(bytes)
-        .map((byte) => String.fromCharCode(byte))
-        .join(""),
-    );
-    const mimeType = imageFile.type || "image/jpeg";
-    const dataUrl = `data:${mimeType};base64,${base64Image}`;
-    console.log(
-      `[DEBUG] 画像変換完了: base64長=${base64Image.length}, MIMEタイプ=${mimeType}`,
-    );
 
     const messages: CoreMessage[] = [
       {
