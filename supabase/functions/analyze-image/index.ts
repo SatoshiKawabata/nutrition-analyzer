@@ -98,17 +98,21 @@ async function detectFoodKeywords(imageBase64: string): Promise<string[]> {
   console.log("[DEBUG] 第1段階: 画像から食品キーワードを抽出中...");
   
   const { object } = await generateObject({
-    model: openai("gpt-4o-mini"),
+    model: openai("gpt-5-mini"),
     schema: keywordDetectionSchema,
     messages: [
       {
         role: "system",
         content:
-          "画像に写っている食品を特定してください。具体的な食品名（例: ご飯、サケ、トマト）または食品カテゴリ（例: 穀類、魚介類、野菜類）をリストアップしてください。",
+          "あなたは優秀な日本の管理栄養士です。日本食品標準成分表に精通しており、画像から食品を正確に特定することができます。",
       },
       {
         role: "user",
         content: [
+          {
+            type: "text",
+            text: "この画像に写っている食品を、日本食品標準成分表の食品名または食品群名で特定してください。\n\n- 具体的な食品名（例: 精白米、サケ、トマト）を優先してください\n- 食品群名（例: 穀類、魚介類、野菜類）は、具体的な食品名が特定できない場合のみ使用してください\n- 画像に写っているすべての食品をリストアップしてください",
+          },
           {
             type: "image",
             image: imageBase64,
@@ -137,49 +141,119 @@ async function searchFoodsByEmbedding(
   }
 
   console.log("[DEBUG] 第2段階: エンベディングAPIで関連食品を検索中...");
+  console.log(`[DEBUG] 検索キーワード: ${keywords.join(", ")}`);
   
   try {
-    // キーワードを結合してエンベディング化
-    const queryText = keywords.join(" ");
-    const queryEmbedding = await getEmbedding(queryText);
-    console.log(`[DEBUG] クエリベクトル生成完了（次元数: ${queryEmbedding.length}）`);
-
-    // Supabase RPC関数でベクトル検索
+    // Supabaseクライアントを作成
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false },
     });
 
-    const { data, error } = await supabase.rpc("search_foods_by_vector", {
-      query_embedding: queryEmbedding,
-      match_threshold: 0.7,
-      match_count: 200,
-    });
+    // 各キーワードごとに個別に検索
+    const allResults: Map<string, { food: FoodRecord; similarity: number }> = new Map();
+    
+    for (const keyword of keywords) {
+      console.log(`[DEBUG] キーワード "${keyword}" で検索中...`);
+      
+      // キーワードをエンベディング化
+      const queryEmbedding = await getEmbedding(keyword);
+      
+      // ベクトル検索（各キーワードごとに50件取得）
+      // 閾値を0.3に設定（キーワードと食品名の表現の違いを考慮）
+      const { data, error } = await supabase.rpc("search_foods_by_vector", {
+        query_embedding: queryEmbedding,
+        match_threshold: 0.3,
+        match_count: 50, // 各キーワードごとに50件
+      });
 
-    if (error) {
-      console.error("[ERROR] ベクトル検索エラー:", error);
+      if (error) {
+        console.error(`[ERROR] キーワード "${keyword}" のベクトル検索エラー:`, error);
+        continue; // エラーが発生しても次のキーワードを処理
+      }
+
+      if (!data || data.length === 0) {
+        console.log(`[DEBUG] キーワード "${keyword}" で結果が見つかりませんでした（閾値: 0.3）`);
+        
+        // デバッグ: 閾値を0.0に下げて実際の類似度を確認
+        console.log(`[DEBUG] デバッグ: 閾値を0.0に下げて類似度を確認中...`);
+        const { data: debugData, error: debugError } = await supabase.rpc("search_foods_by_vector", {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.0, // すべての結果を取得
+          match_count: 10, // 上位10件だけ
+        });
+        
+        if (!debugError && debugData && debugData.length > 0) {
+          const maxSimilarity = Math.max(...debugData.map((item: any) => item.similarity));
+          const minSimilarity = Math.min(...debugData.map((item: any) => item.similarity));
+          console.log(`[DEBUG] 実際の類似度範囲: ${minSimilarity.toFixed(3)} - ${maxSimilarity.toFixed(3)}`);
+          console.log(`[DEBUG] 最高類似度の食品: ${debugData[0].name_jp} (類似度: ${debugData[0].similarity.toFixed(3)})`);
+          
+          // 上位3件を表示
+          console.log(`[DEBUG] 上位3件:`);
+          debugData.slice(0, 3).forEach((item: any, idx: number) => {
+            console.log(`  ${idx + 1}. ${item.name_jp} (類似度: ${item.similarity.toFixed(3)})`);
+          });
+          
+          // 推奨閾値を計算
+          const recommendedThreshold = Math.max(0.3, maxSimilarity - 0.1);
+          console.log(`[DEBUG] 推奨: match_thresholdを ${recommendedThreshold.toFixed(2)} 以下に設定してください`);
+        } else {
+          console.log(`[DEBUG] デバッグ検索でも結果が見つかりませんでした（エンベディングが生成されていない可能性があります）`);
+        }
+        
+        continue;
+      }
+
+      console.log(`[DEBUG] キーワード "${keyword}": ${data.length} 件の食品が見つかりました`);
+      
+      // 類似度の詳細をログに出力（デバッグ用）
+      if (data.length > 0) {
+        const maxSimilarity = Math.max(...data.map((item: any) => item.similarity));
+        const minSimilarity = Math.min(...data.map((item: any) => item.similarity));
+        console.log(`[DEBUG] 類似度範囲: ${minSimilarity.toFixed(3)} - ${maxSimilarity.toFixed(3)}`);
+        
+        // 上位3件の詳細を表示
+        console.log(`[DEBUG] 上位3件:`);
+        data.slice(0, 3).forEach((item: any, idx: number) => {
+          console.log(`  ${idx + 1}. ${item.name_jp} (類似度: ${item.similarity.toFixed(3)})`);
+        });
+      }
+
+      // 結果をマップに追加（重複は類似度が高い方を保持）
+      for (const item of data) {
+        const existing = allResults.get(item.id);
+        if (!existing || item.similarity > existing.similarity) {
+          allResults.set(item.id, {
+            food: {
+              id: item.id,
+              name_jp: item.name_jp,
+              remarks: item.remarks,
+              food_code: item.food_code,
+              index_code: item.index_code,
+              group_id: item.group_id,
+              food_group: item.food_group,
+            },
+            similarity: item.similarity,
+          });
+        }
+      }
+    }
+
+    if (allResults.size === 0) {
+      console.warn("[WARN] すべてのキーワードでベクトル検索結果が見つかりませんでした");
       return [];
     }
 
-    if (!data || data.length === 0) {
-      console.warn("[WARN] ベクトル検索で結果が見つかりませんでした");
-      return [];
-    }
+    console.log(`[DEBUG] 全キーワードの検索結果: ${allResults.size} 件のユニークな食品が見つかりました`);
 
-    console.log(`[DEBUG] ベクトル検索結果: ${data.length} 件の食品が見つかりました`);
-
-    // 結果をFoodRecord形式に変換
-    const results: FoodRecord[] = data.map((item: any) => ({
-      id: item.id,
-      name_jp: item.name_jp,
-      remarks: item.remarks,
-      food_code: item.food_code,
-      index_code: item.index_code,
-      group_id: item.group_id,
-      food_group: item.food_group,
-    }));
+    // 類似度の高い順にソート
+    const sortedResults = Array.from(allResults.values())
+      .sort((a, b) => b.similarity - a.similarity) // 類似度の高い順
+      .slice(0, 200) // 上位200件に制限
+      .map((item) => item.food);
 
     // 食品群の順序 → 食品名の順序でソート
-    results.sort((a, b) => {
+    sortedResults.sort((a, b) => {
       const orderA = a.food_group.original_sort_order;
       const orderB = b.food_group.original_sort_order;
       if (orderA !== orderB) {
@@ -188,7 +262,7 @@ async function searchFoodsByEmbedding(
       return a.name_jp.localeCompare(b.name_jp, "ja");
     });
 
-    return results;
+    return sortedResults;
   } catch (error) {
     console.error("[ERROR] エンベディング検索エラー:", error);
     return [];
