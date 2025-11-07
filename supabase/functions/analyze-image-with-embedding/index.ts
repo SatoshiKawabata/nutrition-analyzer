@@ -65,6 +65,210 @@ const responseSchema = z.object({
     .default([]),
 });
 
+// キーワード抽出用のスキーマ
+const keywordDetectionSchema = z.object({
+  keywords: z.array(z.string()).describe("画像から検出された食品名またはカテゴリ"),
+});
+
+// エンベディングを取得する関数
+async function getEmbedding(text: string): Promise<number[]> {
+  const response = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${openAiApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "text-embedding-3-small",
+      input: text,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`OpenAI Embeddings API error: ${response.status} ${error}`);
+  }
+
+  const data = await response.json();
+  return data.data[0].embedding;
+}
+
+// 第1段階: 画像から食品キーワードを抽出
+async function detectFoodKeywords(imageBase64: string): Promise<string[]> {
+  console.log("[DEBUG] 第1段階: 画像から食品キーワードを抽出中...");
+  
+  const { object } = await generateObject({
+    model: openai("gpt-5-mini"),
+    schema: keywordDetectionSchema,
+    messages: [
+      {
+        role: "system",
+        content:
+          "あなたは優秀な日本の管理栄養士です。日本食品標準成分表に精通しており、画像から食品を正確に特定することができます。",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "この画像に写っている食品を、日本食品標準成分表の食品名または食品群名で特定してください。\n\n- 具体的な食品名（例: 精白米、サケ、トマト）を優先してください\n- 食品群名（例: 穀類、魚介類、野菜類）は、具体的な食品名が特定できない場合のみ使用してください\n- 画像に写っているすべての食品をリストアップしてください",
+          },
+          {
+            type: "image",
+            image: imageBase64,
+          },
+        ],
+      },
+    ],
+  });
+
+  console.log(`[DEBUG] 検出されたキーワード: ${object.keywords.join(", ")}`);
+  return object.keywords;
+}
+
+// 第2段階: エンベディングAPIで関連食品を検索
+async function searchFoodsByEmbedding(
+  keywords: string[],
+): Promise<FoodRecord[]> {
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.warn("[WARN] Supabase認証情報が不足しています");
+    return [];
+  }
+
+  if (keywords.length === 0) {
+    console.warn("[WARN] キーワードが空です");
+    return [];
+  }
+
+  console.log("[DEBUG] 第2段階: エンベディングAPIで関連食品を検索中...");
+  console.log(`[DEBUG] 検索キーワード: ${keywords.join(", ")}`);
+  
+  try {
+    // Supabaseクライアントを作成
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false },
+    });
+
+    // 各キーワードごとに個別に検索
+    const allResults: Map<string, { food: FoodRecord; similarity: number }> = new Map();
+    
+    for (const keyword of keywords) {
+      console.log(`[DEBUG] キーワード "${keyword}" で検索中...`);
+      
+      // キーワードをエンベディング化
+      const queryEmbedding = await getEmbedding(keyword);
+      
+      // ベクトル検索（各キーワードごとに50件取得）
+      // 閾値を0.3に設定（キーワードと食品名の表現の違いを考慮）
+      const { data, error } = await supabase.rpc("search_foods_by_vector", {
+        query_embedding: queryEmbedding,
+        match_threshold: 0.3,
+        match_count: 50, // 各キーワードごとに50件
+      });
+
+      if (error) {
+        console.error(`[ERROR] キーワード "${keyword}" のベクトル検索エラー:`, error);
+        continue; // エラーが発生しても次のキーワードを処理
+      }
+
+      if (!data || data.length === 0) {
+        console.log(`[DEBUG] キーワード "${keyword}" で結果が見つかりませんでした（閾値: 0.3）`);
+        
+        // デバッグ: 閾値を0.0に下げて実際の類似度を確認
+        console.log(`[DEBUG] デバッグ: 閾値を0.0に下げて類似度を確認中...`);
+        const { data: debugData, error: debugError } = await supabase.rpc("search_foods_by_vector", {
+          query_embedding: queryEmbedding,
+          match_threshold: 0.0, // すべての結果を取得
+          match_count: 10, // 上位10件だけ
+        });
+        
+        if (!debugError && debugData && debugData.length > 0) {
+          const maxSimilarity = Math.max(...debugData.map((item: any) => item.similarity));
+          const minSimilarity = Math.min(...debugData.map((item: any) => item.similarity));
+          console.log(`[DEBUG] 実際の類似度範囲: ${minSimilarity.toFixed(3)} - ${maxSimilarity.toFixed(3)}`);
+          console.log(`[DEBUG] 最高類似度の食品: ${debugData[0].name_jp} (類似度: ${debugData[0].similarity.toFixed(3)})`);
+          
+          // 上位3件を表示
+          console.log(`[DEBUG] 上位3件:`);
+          debugData.slice(0, 3).forEach((item: any, idx: number) => {
+            console.log(`  ${idx + 1}. ${item.name_jp} (類似度: ${item.similarity.toFixed(3)})`);
+          });
+          
+          // 推奨閾値を計算
+          const recommendedThreshold = Math.max(0.3, maxSimilarity - 0.1);
+          console.log(`[DEBUG] 推奨: match_thresholdを ${recommendedThreshold.toFixed(2)} 以下に設定してください`);
+        } else {
+          console.log(`[DEBUG] デバッグ検索でも結果が見つかりませんでした（エンベディングが生成されていない可能性があります）`);
+        }
+        
+        continue;
+      }
+
+      console.log(`[DEBUG] キーワード "${keyword}": ${data.length} 件の食品が見つかりました`);
+      
+      // 類似度の詳細をログに出力（デバッグ用）
+      if (data.length > 0) {
+        const maxSimilarity = Math.max(...data.map((item: any) => item.similarity));
+        const minSimilarity = Math.min(...data.map((item: any) => item.similarity));
+        console.log(`[DEBUG] 類似度範囲: ${minSimilarity.toFixed(3)} - ${maxSimilarity.toFixed(3)}`);
+        
+        // 上位3件の詳細を表示
+        console.log(`[DEBUG] 上位3件:`);
+        data.slice(0, 3).forEach((item: any, idx: number) => {
+          console.log(`  ${idx + 1}. ${item.name_jp} (類似度: ${item.similarity.toFixed(3)})`);
+        });
+      }
+
+      // 結果をマップに追加（重複は類似度が高い方を保持）
+      for (const item of data) {
+        const existing = allResults.get(item.id);
+        if (!existing || item.similarity > existing.similarity) {
+          allResults.set(item.id, {
+            food: {
+              id: item.id,
+              name_jp: item.name_jp,
+              remarks: item.remarks,
+              food_code: item.food_code,
+              index_code: item.index_code,
+              group_id: item.group_id,
+              food_group: item.food_group,
+            },
+            similarity: item.similarity,
+          });
+        }
+      }
+    }
+
+    if (allResults.size === 0) {
+      console.warn("[WARN] すべてのキーワードでベクトル検索結果が見つかりませんでした");
+      return [];
+    }
+
+    console.log(`[DEBUG] 全キーワードの検索結果: ${allResults.size} 件のユニークな食品が見つかりました`);
+
+    // 類似度の高い順にソート
+    const sortedResults = Array.from(allResults.values())
+      .sort((a, b) => b.similarity - a.similarity) // 類似度の高い順
+      .slice(0, 200) // 上位200件に制限
+      .map((item) => item.food);
+
+    // 食品群の順序 → 食品名の順序でソート
+    sortedResults.sort((a, b) => {
+      const orderA = a.food_group.original_sort_order;
+      const orderB = b.food_group.original_sort_order;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      return a.name_jp.localeCompare(b.name_jp, "ja");
+    });
+
+    return sortedResults;
+  } catch (error) {
+    console.error("[ERROR] エンベディング検索エラー:", error);
+    return [];
+  }
+}
+
 async function fetchFoods(): Promise<FoodRecord[]> {
   if (!supabaseUrl || !serviceRoleKey) {
     console.warn(
@@ -235,10 +439,21 @@ function buildPrompt(foods: FoodRecord[]): string {
         return `- ${food.name_jp} (ID: ${food.id})`;
       }).join('\n');
       
-      return `### ${groupName}\n${foodList}`;
+      return `## ${groupName}\n${foodList}`;
     }).join('\n\n');
 
-  const prompt = `あなたは食事画像から食品を特定し、重量を推定する管理栄養士です。
+  // IDマッピング用のリスト（検索用）
+  // 現在は未使用だが、将来的にAIが検索しやすい形式で提供する可能性があるため残す
+  // const foodIdMap = foods.map(food => ({
+  //   id: food.id,
+  //   name_jp: food.name_jp,
+  //   group: food.food_group.name_jp,
+  //   food_code: food.food_code,
+  //   index_code: food.index_code,
+  //   remarks: food.remarks,
+  // }));
+
+  const prompt = `あなたは食事画像から食品を特定し、重量を推定する専門家です。
 
 ## タスク
 入力画像に写っている食品を以下のリストから特定し、それぞれのおおよその重量(g)を推定してください。
@@ -396,9 +611,31 @@ serve(async (req) => {
       `[DEBUG] 画像変換完了: base64長=${base64Image.length}, MIMEタイプ=${mimeType}`,
     );
 
-    // 全食品を取得してプロンプトに含める
-    console.log("[DEBUG] 全食品リストを取得中...");
-    const foods = await fetchFoods();
+    // RAGアプローチ: キーワード抽出 → エンベディング検索 → 重量推定
+    let foods: FoodRecord[] = [];
+    
+    try {
+      // 第1段階: 画像からキーワードを抽出
+      const keywords = await detectFoodKeywords(dataUrl);
+      
+      // 第2段階: エンベディングAPIで関連食品を検索
+      const relevantFoods = await searchFoodsByEmbedding(keywords);
+      
+      if (relevantFoods.length > 0) {
+        foods = relevantFoods;
+        console.log(
+          `[DEBUG] エンベディング検索成功: ${foods.length} 件の関連食品を取得しました`,
+        );
+      } else {
+        // フォールバック: エンベディング検索で結果がない場合、全食品を取得
+        console.warn("[WARN] エンベディング検索で結果が見つかりませんでした。全食品を取得します。");
+        foods = await fetchFoods();
+      }
+    } catch (error) {
+      // フォールバック: エンベディング検索が失敗した場合、全食品を取得
+      console.warn("[WARN] エンベディング検索失敗、フォールバック:", error);
+      foods = await fetchFoods();
+    }
 
     console.log(
       `[DEBUG] 使用する食品リスト: ${foods.length} 件`,

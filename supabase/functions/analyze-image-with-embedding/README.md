@@ -1,21 +1,7 @@
 # analyze-image Function
 
-画像をアップロードして、写っている食品を特定し、重量を推定する Supabase Edge Function です。
-
-**注意**: この関数は全食品リストをプロンプトに含める方式です。エンベディング検索を使用する版は `analyze-image-with-embedding` を参照してください。
-
-## 機能
-
-- 画像から食品を特定
-- 各食品の重量を推定（グラム単位）
-- 日本食品標準成分表に基づいた食品データベースから検索
-
-## 処理フロー
-
-1. 画像をBase64形式に変換
-2. データベースから全食品リストを取得（最大3000件、ページネーション対応）
-3. 全食品リストをプロンプトに含めて、AIに画像分析を依頼
-4. 検出された食品と推定重量をJSON形式で返却
+画像をアップロードして、写っている食品を特定し、重量を推定する Supabase Edge
+Function です。
 
 ## ローカルでの動作確認方法
 
@@ -62,10 +48,13 @@ SUPABASE_URL=http://127.0.0.1:54321
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
-**注意**: `.env`ファイルは`.gitignore`に含まれているため、Git にはコミットされません。
+**注意**: `.env`ファイルは`.gitignore`に含まれているため、Git
+にはコミットされません。
 
 **重要**:
-`SUPABASE_`で始まる環境変数（`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`など）は、Supabase CLI が自動的にスキップします。これらはローカル環境では`supabase start`で自動設定されるため、`.env`ファイルには含めないでください（`.env`ファイルには`OPENAI_API_KEY`のみを含めてください）。
+`SUPABASE_`で始まる環境変数（`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`など）は、Supabase
+CLI
+が自動的にスキップします。これらはローカル環境では`supabase start`で自動設定されるため、`.env`ファイルには含めないでください（`.env`ファイルには`OPENAI_API_KEY`のみを含めてください）。
 
 ### 2. Supabase データベースへの接続設定
 
@@ -86,7 +75,8 @@ supabase status
 
 #### リモート環境を使用する場合（ローカルで Function を起動）
 
-ローカルで Function を起動しつつ、リモートの Supabase データベースに接続する場合：
+ローカルで Function を起動しつつ、リモートの Supabase
+データベースに接続する場合：
 
 1. **リモート環境の URL と Service Role Key を取得**
 
@@ -108,8 +98,11 @@ supabase projects api-keys --project-ref YOUR_PROJECT_REF
 
 ```bash
 # リモート環境のURLとService Role Keyを設定
-export REMOTE_SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
-export REMOTE_SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+export SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+# Functionを起動
+supabase functions serve analyze-image --no-verify-jwt --env-file .env
 ```
 
 **注意**:
@@ -119,8 +112,8 @@ export REMOTE_SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ```bash
 OPENAI_API_KEY="sk-your-key" \
-REMOTE_SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co" \
-REMOTE_SUPABASE_SERVICE_ROLE_KEY="your-service-role-key" \
+SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co" \
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key" \
 supabase functions serve analyze-image --no-verify-jwt
 ```
 
@@ -160,7 +153,8 @@ export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 supabase functions serve analyze-image --no-verify-jwt
 ```
 
-**注意**: `export`で設定した環境変数は、`supabase functions serve`実行時に Edge Runtime に渡されない場合があります。`--env-file`オプションの使用を推奨します。
+**注意**: `export`で設定した環境変数は、`supabase functions serve`実行時に Edge
+Runtime に渡されない場合があります。`--env-file`オプションの使用を推奨します。
 
 ### トラブルシューティング
 
@@ -194,11 +188,17 @@ curl -X POST http://localhost:54321/functions/v1/analyze-image \
   -F "image=@/path/to/your/image.jpg"
 ```
 
-または、ブラウザでテストする場合は、`test.html`を使用：
+または、ブラウザでテストする場合は、HTML フォームを使用：
 
-```bash
-# ブラウザで test.html を開く
-open supabase/functions/analyze-image/test.html
+```html
+<form
+  action="http://localhost:54321/functions/v1/analyze-image"
+  method="POST"
+  enctype="multipart/form-data"
+>
+  <input type="file" name="image" accept="image/*" />
+  <button type="submit">送信</button>
+</form>
 ```
 
 ## リクエスト形式
@@ -222,20 +222,3 @@ open supabase/functions/analyze-image/test.html
   ]
 }
 ```
-
-## プロンプトの確認方法
-
-プロンプトの内容を確認したい場合は、環境変数`DEBUG_PROMPT=true`を設定してください：
-
-```bash
-DEBUG_PROMPT=true supabase functions serve analyze-image --no-verify-jwt
-```
-
-これにより、プロンプトの全文がログに出力されます。
-
-## 注意事項
-
-- 全食品リストをプロンプトに含めるため、プロンプトサイズが大きくなります（約240KB程度）
-- `gpt-4o-mini`のコンテキストウィンドウ制限内に収まるよう、食品数は最大3000件に制限しています
-- より効率的な検索を希望する場合は、`analyze-image-with-embedding`（エンベディング検索版）の使用を検討してください
-
