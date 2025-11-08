@@ -371,29 +371,12 @@ serve(async (req) => {
       `[DEBUG] 画像ファイル受信: 名前=${imageFile.name}, サイズ=${imageFile.size} バイト, タイプ=${imageFile.type}`,
     );
 
-    console.log("[DEBUG] 画像をbase64に変換中...");
+    console.log("[DEBUG] 画像データを読み込み中...");
     const arrayBuffer = await imageFile.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    
-    // メモリ効率的なBase64変換（チャンク処理でメモリ使用量を抑制）
-    // 大きな画像でもメモリ効率的に処理できるよう、チャンクごとに変換
-    // String.fromCharCode.applyに大きな配列を渡すとスタックオーバーフローのリスクがあるため、
-    // 小さなチャンク（最大3KB）ごとに処理してメモリ使用量を抑制
-    const CHUNK_SIZE = 3072; // 3KBごとに処理（スタックオーバーフローを回避、btoaの引数制限も考慮）
-    let base64Image = "";
-    
-    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-      const chunk = bytes.slice(i, i + CHUNK_SIZE);
-      // チャンクごとに文字列変換してBase64化（メモリ効率的）
-      // 小さなチャンクなので、String.fromCharCode.applyでも安全
-      const chunkArray = Array.from(chunk);
-      const chunkString = String.fromCharCode.apply(null, chunkArray);
-      base64Image += btoa(chunkString);
-    }
+    const imageData = new Uint8Array(arrayBuffer);
     const mimeType = imageFile.type || "image/jpeg";
-    const dataUrl = `data:${mimeType};base64,${base64Image}`;
     console.log(
-      `[DEBUG] 画像変換完了: base64長=${base64Image.length}, MIMEタイプ=${mimeType}`,
+      `[DEBUG] 画像データ読み込み完了: サイズ=${imageData.length} バイト, MIMEタイプ=${mimeType}`,
     );
 
     // 全食品を取得してプロンプトに含める
@@ -433,7 +416,7 @@ serve(async (req) => {
           { type: "text", text: prompt },
           {
             type: "image",
-            image: dataUrl,
+            image: imageData,
           },
         ],
       },
@@ -450,7 +433,7 @@ serve(async (req) => {
       console.log("\n[User Message (Text)]:");
       console.log(prompt);
       console.log("\n[User Message (Image)]:");
-      console.log(`画像データ: ${dataUrl.substring(0, 50)}... (base64長: ${base64Image.length}文字)`);
+      console.log(`画像データ: Uint8Array(${imageData.length} バイト), MIMEタイプ: ${mimeType}`);
       console.log("=".repeat(80) + "\n");
     }
 
