@@ -439,12 +439,30 @@ serve(async (req) => {
       },
     ];
 
+    // DEBUG_PROMPTがtrueの場合、プロンプト全文を出力
+    const debugPrompt = Deno.env.get("DEBUG_PROMPT") === "true";
+    if (debugPrompt) {
+      console.log("\n" + "=".repeat(80));
+      console.log("[DEBUG_PROMPT] プロンプト全文:");
+      console.log("=".repeat(80));
+      console.log("\n[System Message]:");
+      console.log(messages[0].content);
+      console.log("\n[User Message (Text)]:");
+      console.log(prompt);
+      console.log("\n[User Message (Image)]:");
+      console.log(`画像データ: ${dataUrl.substring(0, 50)}... (base64長: ${base64Image.length}文字)`);
+      console.log("=".repeat(80) + "\n");
+    }
+
     console.log("[DEBUG] OpenAI API (gpt-4o-mini) を呼び出し中...");
     const startTime = Date.now();
     const { object } = await generateObject({
       model: openai("gpt-4o-mini"),
       schema: responseSchema,
       messages,
+      temperature: 0.0,
+      topP:1.0,
+      maxOutputTokens: 2048,
     });
     const elapsedTime = Date.now() - startTime;
     console.log(`[DEBUG] OpenAI APIレスポンス受信: ${elapsedTime}ms`);
