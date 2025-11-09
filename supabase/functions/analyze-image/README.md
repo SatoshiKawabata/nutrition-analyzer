@@ -49,23 +49,43 @@ cp .env.example .env
 # .env ファイルを編集して、実際の値を設定してください
 ```
 
-`.env.example`をコピーして`.env`ファイルを作成し、実際の値を設定します：
+`.env`ファイルを作成し、実際の値を設定します：
 
 ```bash
-# OpenAI API Key（必須）
-OPENAI_API_KEY=sk-your-actual-api-key-here
+# AIプロバイダーの選択（google または openai、デフォルト: google）
+AI_PROVIDER=google
 
-# Supabase URL（ローカル環境の場合）
-SUPABASE_URL=http://127.0.0.1:54321
+# Google AI API Key（AI_PROVIDER=googleの場合に必要）
+# Google AI Studio (https://ai.google.dev/) で取得
+GOOGLE_GENERATIVE_AI_API_KEY=your-google-api-key-here
+# または
+# GOOGLE_AI_API_KEY=your-google-api-key-here
 
-# Supabase Service Role Key（ローカル環境が起動している場合）
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+# OpenAI API Key（AI_PROVIDER=openaiの場合に必要）
+# OpenAI Platform (https://platform.openai.com/) で取得
+OPENAI_API_KEY=sk-your-openai-api-key-here
+# または
+# AI_OPENAI_API_KEY=sk-your-openai-api-key-here
+
+# Supabase設定（リモート環境を使用する場合）
+# ローカルでFunctionを起動しつつ、リモートのSupabase DBに接続する場合
+REMOTE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+REMOTE_SUPABASE_SERVICE_ROLE_KEY=your-remote-service-role-key
+
+# デバッグ設定（オプション）
+# プロンプト全文をコンソールに出力する場合は true に設定
+DEBUG_PROMPT=false
 ```
+
+**注意**: 
+- ローカル環境を使用する場合、`SUPABASE_URL`と`SUPABASE_SERVICE_ROLE_KEY`は`supabase start`で自動設定されるため、`.env`ファイルには含めないでください
+- `AI_PROVIDER`で選択したプロバイダーのAPIキーを設定してください（両方設定しても問題ありません）
 
 **注意**: `.env`ファイルは`.gitignore`に含まれているため、Git にはコミットされません。
 
 **重要**:
-`SUPABASE_`で始まる環境変数（`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`など）は、Supabase CLI が自動的にスキップします。これらはローカル環境では`supabase start`で自動設定されるため、`.env`ファイルには含めないでください（`.env`ファイルには`OPENAI_API_KEY`のみを含めてください）。
+- `SUPABASE_`で始まる環境変数（`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`など）は、Supabase CLI が自動的にスキップします。これらはローカル環境では`supabase start`で自動設定されるため、`.env`ファイルには含めないでください
+- `AI_PROVIDER`で選択したプロバイダーのAPIキーを設定してください（例: `AI_PROVIDER=google`の場合は`GOOGLE_GENERATIVE_AI_API_KEY`を設定）
 
 ### 2. Supabase データベースへの接続設定
 
@@ -124,12 +144,21 @@ REMOTE_SUPABASE_SERVICE_ROLE_KEY="your-service-role-key" \
 supabase functions serve analyze-image --no-verify-jwt
 ```
 
-**方法 B: .env ファイルに別名で設定**
+**方法 B: .env ファイルに設定**
 
 `.env`ファイルに以下を設定：
 
 ```bash
-OPENAI_API_KEY=sk-your-key
+# AIプロバイダーの選択
+AI_PROVIDER=google
+
+# 選択したプロバイダーのAPIキー
+GOOGLE_GENERATIVE_AI_API_KEY=your-google-api-key
+# または OpenAI を使用する場合
+# AI_PROVIDER=openai
+# OPENAI_API_KEY=sk-your-openai-api-key
+
+# リモート環境の設定
 REMOTE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 REMOTE_SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
@@ -164,24 +193,32 @@ supabase functions serve analyze-image --no-verify-jwt
 
 ### トラブルシューティング
 
-**エラー: `OpenAI API key is not configured`**
+**エラー: `AI API key is not configured`**
 
-1. Function を起動したターミナルで環境変数が設定されているか確認：
+1. `.env`ファイルで`AI_PROVIDER`が正しく設定されているか確認：
 
    ```bash
-   echo $OPENAI_API_KEY
+   # Google AIを使用する場合
+   AI_PROVIDER=google
+   GOOGLE_GENERATIVE_AI_API_KEY=your-google-api-key
+   
+   # OpenAIを使用する場合
+   AI_PROVIDER=openai
+   OPENAI_API_KEY=sk-your-openai-api-key
    ```
 
-2. 設定されていない場合、同じターミナルで設定してから再起動：
+2. Function を起動したターミナルで環境変数が設定されているか確認：
 
    ```bash
-   export OPENAI_API_KEY="sk-your-key"
-   supabase functions serve analyze-image --no-verify-jwt
+   echo $AI_PROVIDER
+   echo $GOOGLE_GENERATIVE_AI_API_KEY  # Google AIを使用する場合
+   echo $OPENAI_API_KEY                # OpenAIを使用する場合
    ```
 
-3. または、一行で実行：
+3. 設定されていない場合、`.env`ファイルを確認してから再起動：
+
    ```bash
-   OPENAI_API_KEY="sk-your-key" supabase functions serve analyze-image --no-verify-jwt
+   supabase functions serve analyze-image --no-verify-jwt --env-file .env
    ```
 
 ### 4. テストリクエストの送信
@@ -233,9 +270,21 @@ DEBUG_PROMPT=true supabase functions serve analyze-image --no-verify-jwt
 
 これにより、プロンプトの全文がログに出力されます。
 
+## AIプロバイダーの切り替え
+
+環境変数`AI_PROVIDER`で、Google GeminiとOpenAI GPTを切り替えできます：
+
+- **Google Gemini（デフォルト）**: `AI_PROVIDER=google`
+  - モデル: `gemini-2.0-flash`
+  - APIキー: `GOOGLE_GENERATIVE_AI_API_KEY`または`GOOGLE_AI_API_KEY`
+  
+- **OpenAI GPT**: `AI_PROVIDER=openai`
+  - モデル: `gpt-4o-mini`
+  - APIキー: `OPENAI_API_KEY`または`AI_OPENAI_API_KEY`
+
 ## 注意事項
 
 - 全食品リストをプロンプトに含めるため、プロンプトサイズが大きくなります（約240KB程度）
-- `gpt-4o-mini`のコンテキストウィンドウ制限内に収まるよう、食品数は最大3000件に制限しています
+- AIモデルのコンテキストウィンドウ制限内に収まるよう、食品数は最大3000件に制限しています
 - より効率的な検索を希望する場合は、`analyze-image-with-embedding`（エンベディング検索版）の使用を検討してください
 

@@ -1,8 +1,8 @@
 import { serve } from "https://deno.land/std@0.210.0/http/server.ts";
-import { createOpenAI } from "npm:@ai-sdk/openai@2.0.59";
-import { type CoreMessage, generateObject } from "npm:ai@5.0.86";
+import { type CoreMessage } from "npm:ai@5.0.86";
 import { z } from "npm:zod@3.25.76";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { analyzeImageWithAI, validateAPIKey } from "../_shared/ai.ts";
 
 type FoodRecord = {
   id: string;
@@ -25,8 +25,6 @@ const RESPONSE_HEADERS = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const openAiApiKey = Deno.env.get("OPENAI_API_KEY") ??
-  Deno.env.get("AI_OPENAI_API_KEY");
 // REMOTE_SUPABASE_URLを優先的に使用（リモート環境への接続）
 // SUPABASE_URLはローカル環境で自動設定されるが、リモート環境を使う場合はREMOTE_を優先
 const supabaseUrl = Deno.env.get("REMOTE_SUPABASE_URL") ??
@@ -34,22 +32,11 @@ const supabaseUrl = Deno.env.get("REMOTE_SUPABASE_URL") ??
 const serviceRoleKey = Deno.env.get("REMOTE_SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-console.log("[DEBUG] OpenAI API Key:", openAiApiKey ? "設定済み" : "未設定");
 console.log("[DEBUG] Supabase URL:", supabaseUrl || "未設定");
 console.log(
   `[DEBUG] Service Role Key: ${serviceRoleKey ? "設定済み" : "未設定"}`,
   serviceRoleKey ? "設定済み" : "未設定",
 );
-
-if (!openAiApiKey) {
-  console.warn(
-    "[WARN] OPENAI_API_KEY (または AI_OPENAI_API_KEY) が設定されていません。analyze-image function は失敗します。",
-  );
-}
-
-const openai = createOpenAI({
-  apiKey: openAiApiKey ?? "",
-});
 
 const responseSchema = z.object({
   detections: z
@@ -321,11 +308,13 @@ serve(async (req) => {
     );
   }
 
-  if (!openAiApiKey) {
-    console.error("[ERROR] OpenAI APIキーが設定されていません");
+  // AIプロバイダーのAPIキーをチェック
+  const apiKeyValidation = validateAPIKey();
+  if (!apiKeyValidation.valid) {
+    console.error(`[ERROR] ${apiKeyValidation.error}`);
     return new Response(
       JSON.stringify({
-        error: "AIプロバイダーのAPIキーが設定されていません。",
+        error: apiKeyValidation.error,
       }),
       {
         status: 500,
@@ -373,10 +362,22 @@ serve(async (req) => {
 
     console.log("[DEBUG] 画像データを読み込み中...");
     const arrayBuffer = await imageFile.arrayBuffer();
-    const imageData = new Uint8Array(arrayBuffer);
+    const imageBytes = new Uint8Array(arrayBuffer);
     const mimeType = imageFile.type || "image/jpeg";
+    
+    // Gemini用にBase64文字列に変換
+    const CHUNK_SIZE = 3072;
+    let base64Image = "";
+    for (let i = 0; i < imageBytes.length; i += CHUNK_SIZE) {
+      const chunk = imageBytes.slice(i, i + CHUNK_SIZE);
+      const chunkArray = Array.from(chunk);
+      const chunkString = String.fromCharCode.apply(null, chunkArray);
+      base64Image += btoa(chunkString);
+    }
+    const imageData = `data:${mimeType};base64,${base64Image}`;
+    
     console.log(
-      `[DEBUG] 画像データ読み込み完了: サイズ=${imageData.length} バイト, MIMEタイプ=${mimeType}`,
+      `[DEBUG] 画像データ読み込み完了: サイズ=${imageBytes.length} バイト, MIMEタイプ=${mimeType}, Base64長=${base64Image.length}`,
     );
 
     // 全食品を取得してプロンプトに含める
@@ -433,22 +434,12 @@ serve(async (req) => {
       console.log("\n[User Message (Text)]:");
       console.log(prompt);
       console.log("\n[User Message (Image)]:");
-      console.log(`画像データ: Uint8Array(${imageData.length} バイト), MIMEタイプ: ${mimeType}`);
+      console.log(`画像データ: Base64(${base64Image.length} 文字), MIMEタイプ: ${mimeType}`);
       console.log("=".repeat(80) + "\n");
     }
 
-    console.log("[DEBUG] OpenAI API (gpt-4o-mini) を呼び出し中...");
-    const startTime = Date.now();
-    const { object } = await generateObject({
-      model: openai("gpt-4o-mini"),
-      schema: responseSchema,
-      messages,
-      temperature: 0.0,
-      topP:1.0,
-      maxOutputTokens: 2048,
-    });
-    const elapsedTime = Date.now() - startTime;
-    console.log(`[DEBUG] OpenAI APIレスポンス受信: ${elapsedTime}ms`);
+    // AIプロバイダーを使用して画像解析を実行
+    const object = await analyzeImageWithAI(messages, responseSchema);
     console.log(`[DEBUG] AI生レスポンス:`, JSON.stringify(object, null, 2));
 
     // generateObjectは自動でスキーマ検証を行うため、手動検証は不要
@@ -496,7 +487,7 @@ serve(async (req) => {
       if (error.message.includes("dns error")) {
         errorMessage = "ネットワーク接続エラーが発生しました。外部サービスの接続を確認してください。";
         statusCode = 503;
-      } else if (error.message.includes("OpenAI")) {
+      } else if (error.message.includes("Google") || error.message.includes("Gemini") || error.message.includes("OpenAI")) {
         errorMessage = "AIサービスの接続に失敗しました。APIキーとネットワーク接続を確認してください。";
         statusCode = 503;
       } else if (error.message.includes("Supabase")) {
