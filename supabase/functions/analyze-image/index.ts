@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.210.0/http/server.ts";
 import { type CoreMessage } from "npm:ai@5.0.86";
 import { z } from "npm:zod@3.25.76";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { analyzeImageWithAI, validateAPIKey } from "../_shared/ai.ts";
+import { analyzeImageWithAI, analyzeImageWithCustomOpenAI, validateAPIKey, getAIProvider } from "../_shared/ai.ts";
 
 type FoodRecord = {
   id: string;
@@ -287,6 +287,25 @@ ${foodsByGroup}
   return prompt;
 }
 
+// 食品群ごとにフォーマットされた食品リストを生成する関数（カスタムAPI用）
+function buildFoodsByGroup(foods: FoodRecord[]): string {
+  const groupedFoods = groupFoodsByCategory(foods);
+  
+  return Object.entries(groupedFoods)
+    .sort(([a], [b]) => {
+      const orderA = foods.find(f => f.food_group.name_jp === a)?.food_group.original_sort_order ?? 999;
+      const orderB = foods.find(f => f.food_group.name_jp === b)?.food_group.original_sort_order ?? 999;
+      return orderA - orderB;
+    })
+    .map(([groupName, groupFoods]) => {
+      const foodList = groupFoods.map(food => {
+        return `- ${food.name_jp} (ID: ${food.id})`;
+      }).join('\n');
+      
+      return `### ${groupName}\n${foodList}`;
+    }).join('\n\n');
+}
+
 serve(async (req) => {
   console.log(
     `[${new Date().toISOString()}] 📥 リクエスト受信: ${req.method} ${req.url}`,
@@ -402,44 +421,72 @@ serve(async (req) => {
       );
     }
 
-    const prompt = buildPrompt(foods);
-    console.log(`[DEBUG] プロンプト長: ${prompt.length} 文字`);
+    const currentProvider = getAIProvider();
+    let object: z.infer<typeof responseSchema>;
 
-    const messages: CoreMessage[] = [
-      {
-        role: "system",
-        content:
-          "あなたは食事画像から日本食品標準成分表（八訂）増補2023年版に載っている食品を特定し、重量を推定する管理栄養士です。画像を詳細に分析し、提供された日本食品標準成分表（八訂）増補2023年版の食品リストから最も適切な食品を選択し、視覚的な手がかり（サイズ、容器、一般的なサイズ感など）を基に重量を推定してください。確信度は、食品の識別精度と重量推定の確実性に基づいて評価してください。結果は必ず指定されたJSON形式で返してください。",
-      },
-      {
-        role: "user",
-        content: [
-          { type: "text", text: prompt },
-          {
-            type: "image",
-            image: imageData,
-          },
-        ],
-      },
-    ];
+    // カスタムOpenAI APIの場合は、foodsByGroupだけを渡す
+    if (currentProvider === "custom-openai") {
+      console.log("[DEBUG] カスタムOpenAI APIを使用します");
+      const foodsByGroup = buildFoodsByGroup(foods);
+      console.log(`[DEBUG] Foods by Group length: ${foodsByGroup.length} 文字`);
 
-    // DEBUG_PROMPTがtrueの場合、プロンプト全文を出力
-    const debugPrompt = Deno.env.get("DEBUG_PROMPT") === "true";
-    if (debugPrompt) {
-      console.log("\n" + "=".repeat(80));
-      console.log("[DEBUG_PROMPT] プロンプト全文:");
-      console.log("=".repeat(80));
-      console.log("\n[System Message]:");
-      console.log(messages[0].content);
-      console.log("\n[User Message (Text)]:");
-      console.log(prompt);
-      console.log("\n[User Message (Image)]:");
-      console.log(`画像データ: Base64(${base64Image.length} 文字), MIMEタイプ: ${mimeType}`);
-      console.log("=".repeat(80) + "\n");
+      // DEBUG_PROMPTがtrueの場合、foodsByGroupを出力
+      const debugPrompt = Deno.env.get("DEBUG_PROMPT") === "true";
+      if (debugPrompt) {
+        console.log("\n" + "=".repeat(80));
+        console.log("[DEBUG_PROMPT] カスタムAPI用データ:");
+        console.log("=".repeat(80));
+        console.log("\n[Foods by Group]:");
+        console.log(foodsByGroup);
+        console.log("\n[Image]:");
+        console.log(`画像データ: Base64(${base64Image.length} 文字), MIMEタイプ: ${mimeType}`);
+        console.log("=".repeat(80) + "\n");
+      }
+
+      // カスタムOpenAI APIを使用
+      object = await analyzeImageWithCustomOpenAI(imageData, foodsByGroup, responseSchema);
+    } else {
+      // 通常のAIプロバイダー（Google/OpenAI）の場合は、プロンプト全文を使用
+      const prompt = buildPrompt(foods);
+      console.log(`[DEBUG] プロンプト長: ${prompt.length} 文字`);
+
+      const messages: CoreMessage[] = [
+        {
+          role: "system",
+          content:
+            "あなたは食事画像から日本食品標準成分表（八訂）増補2023年版に載っている食品を特定し、重量を推定する管理栄養士です。画像を詳細に分析し、提供された日本食品標準成分表（八訂）増補2023年版の食品リストから最も適切な食品を選択し、視覚的な手がかり（サイズ、容器、一般的なサイズ感など）を基に重量を推定してください。確信度は、食品の識別精度と重量推定の確実性に基づいて評価してください。結果は必ず指定されたJSON形式で返してください。",
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image",
+              image: imageData,
+            },
+          ],
+        },
+      ];
+
+      // DEBUG_PROMPTがtrueの場合、プロンプト全文を出力
+      const debugPrompt = Deno.env.get("DEBUG_PROMPT") === "true";
+      if (debugPrompt) {
+        console.log("\n" + "=".repeat(80));
+        console.log("[DEBUG_PROMPT] プロンプト全文:");
+        console.log("=".repeat(80));
+        console.log("\n[System Message]:");
+        console.log(messages[0].content);
+        console.log("\n[User Message (Text)]:");
+        console.log(prompt);
+        console.log("\n[User Message (Image)]:");
+        console.log(`画像データ: Base64(${base64Image.length} 文字), MIMEタイプ: ${mimeType}`);
+        console.log("=".repeat(80) + "\n");
+      }
+
+      // 通常のAIプロバイダーを使用
+      object = await analyzeImageWithAI(messages, responseSchema);
     }
 
-    // AIプロバイダーを使用して画像解析を実行
-    const object = await analyzeImageWithAI(messages, responseSchema);
     console.log(`[DEBUG] AI生レスポンス:`, JSON.stringify(object, null, 2));
 
     // generateObjectは自動でスキーマ検証を行うため、手動検証は不要
