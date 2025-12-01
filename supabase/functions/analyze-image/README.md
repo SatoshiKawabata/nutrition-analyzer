@@ -23,23 +23,7 @@
 
 **重要**: Function を起動する前に、環境変数を設定する必要があります。
 
-#### 方法 A: シェルで直接設定（推奨）
-
-Function を起動するターミナルで以下を実行：
-
-```bash
-# OpenAI API Key（必須）
-export OPENAI_API_KEY="sk-your-actual-api-key-here"
-
-# Supabase URL（ローカル環境の場合）
-export SUPABASE_URL="http://127.0.0.1:54321"
-
-# Supabase Service Role Key（ローカル環境が起動している場合）
-# supabase status で確認できます
-export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-```
-
-#### 方法 B: .env ファイルを使用（推奨）
+#### 方法 A: .env ファイルを使用（推奨）
 
 `supabase/`ディレクトリに`.env`ファイルを作成：
 
@@ -49,7 +33,7 @@ cp .env.example .env
 # .env ファイルを編集して、実際の値を設定してください
 ```
 
-`.env`ファイルを作成し、実際の値を設定します：
+`.env`ファイルの設定例：
 
 ```bash
 # AIプロバイダーの選択（google または openai、デフォルト: google）
@@ -77,15 +61,35 @@ REMOTE_SUPABASE_SERVICE_ROLE_KEY=your-remote-service-role-key
 DEBUG_PROMPT=false
 ```
 
-**注意**: 
-- ローカル環境を使用する場合、`SUPABASE_URL`と`SUPABASE_SERVICE_ROLE_KEY`は`supabase start`で自動設定されるため、`.env`ファイルには含めないでください
-- `AI_PROVIDER`で選択したプロバイダーのAPIキーを設定してください（両方設定しても問題ありません）
-
-**注意**: `.env`ファイルは`.gitignore`に含まれているため、Git にはコミットされません。
-
 **重要**:
-- `SUPABASE_`で始まる環境変数（`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`など）は、Supabase CLI が自動的にスキップします。これらはローカル環境では`supabase start`で自動設定されるため、`.env`ファイルには含めないでください
+- `.env`ファイルは`.gitignore`に含まれているため、Git にはコミットされません
+- ローカル環境を使用する場合、`SUPABASE_URL`と`SUPABASE_SERVICE_ROLE_KEY`は`supabase start`で自動設定されるため、`.env`ファイルには含めないでください
+- `SUPABASE_`で始まる環境変数（`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`など）は、Supabase CLI が自動的にスキップします
 - `AI_PROVIDER`で選択したプロバイダーのAPIキーを設定してください（例: `AI_PROVIDER=google`の場合は`GOOGLE_GENERATIVE_AI_API_KEY`を設定）
+
+#### 方法 B: シェルで直接設定
+
+Function を起動するターミナルで以下を実行：
+
+```bash
+# AIプロバイダーの選択
+export AI_PROVIDER="google"
+
+# 選択したプロバイダーのAPIキー
+export GOOGLE_GENERATIVE_AI_API_KEY="your-google-api-key-here"
+# または OpenAI を使用する場合
+# export AI_PROVIDER="openai"
+# export OPENAI_API_KEY="sk-your-openai-api-key-here"
+
+# Supabase URL（ローカル環境の場合）
+export SUPABASE_URL="http://127.0.0.1:54321"
+
+# Supabase Service Role Key（ローカル環境が起動している場合）
+# supabase status で確認できます
+export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+```
+
+**注意**: `export`で設定した環境変数は、`supabase functions serve`実行時に Edge Runtime に渡されない場合があります。`--env-file`オプションの使用を推奨します。
 
 ### 2. Supabase データベースへの接続設定
 
@@ -124,50 +128,11 @@ supabase projects api-keys --project-ref YOUR_PROJECT_REF
 
 2. **環境変数を設定**
 
-リモート環境の URL と Service Role Key を環境変数として設定します：
+`.env`ファイルに`REMOTE_SUPABASE_URL`と`REMOTE_SUPABASE_SERVICE_ROLE_KEY`を追加してください（上記「方法 A: .env ファイルを使用」を参照）。
 
-```bash
-# リモート環境のURLとService Role Keyを設定
-export REMOTE_SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
-export REMOTE_SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-**注意**:
-`SUPABASE_`で始まる環境変数は`--env-file`オプションでスキップされるため、以下のいずれかの方法を使用してください。
-
-**方法 A: 環境変数として直接設定（推奨）**
-
-```bash
-OPENAI_API_KEY="sk-your-key" \
-REMOTE_SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co" \
-REMOTE_SUPABASE_SERVICE_ROLE_KEY="your-service-role-key" \
-supabase functions serve analyze-image --no-verify-jwt
-```
-
-**方法 B: .env ファイルに設定**
-
-`.env`ファイルに以下を設定：
-
-```bash
-# AIプロバイダーの選択
-AI_PROVIDER=google
-
-# 選択したプロバイダーのAPIキー
-GOOGLE_GENERATIVE_AI_API_KEY=your-google-api-key
-# または OpenAI を使用する場合
-# AI_PROVIDER=openai
-# OPENAI_API_KEY=sk-your-openai-api-key
-
-# リモート環境の設定
-REMOTE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-REMOTE_SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-```
-
-コードは自動的に`REMOTE_SUPABASE_URL`と`REMOTE_SUPABASE_SERVICE_ROLE_KEY`も読み込みます。
+**注意**: `SUPABASE_`で始まる環境変数は`--env-file`オプションでスキップされるため、リモート環境を使用する場合は`REMOTE_SUPABASE_URL`と`REMOTE_SUPABASE_SERVICE_ROLE_KEY`を使用してください。
 
 ### 3. Function の起動
-
-#### .env ファイルを使用する場合（推奨）
 
 `.env`ファイルを作成済みの場合、`--env-file`オプションを使用して実行：
 
@@ -177,19 +142,6 @@ supabase functions serve analyze-image --no-verify-jwt --env-file .env
 ```
 
 これで、`.env`ファイルの環境変数が Edge Runtime に正しく渡されます。
-
-#### 環境変数を直接設定する場合
-
-`.env`ファイルを使わない場合、環境変数を設定してから実行：
-
-```bash
-export OPENAI_API_KEY="sk-your-key"
-export SUPABASE_URL="http://127.0.0.1:54321"
-export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-supabase functions serve analyze-image --no-verify-jwt
-```
-
-**注意**: `export`で設定した環境変数は、`supabase functions serve`実行時に Edge Runtime に渡されない場合があります。`--env-file`オプションの使用を推奨します。
 
 ### トラブルシューティング
 
@@ -260,16 +212,6 @@ open supabase/functions/analyze-image/test.html
 }
 ```
 
-## プロンプトの確認方法
-
-プロンプトの内容を確認したい場合は、環境変数`DEBUG_PROMPT=true`を設定してください：
-
-```bash
-DEBUG_PROMPT=true supabase functions serve analyze-image --no-verify-jwt
-```
-
-これにより、プロンプトの全文がログに出力されます。
-
 ## AIプロバイダーの切り替え
 
 環境変数`AI_PROVIDER`で、Google GeminiとOpenAI GPTを切り替えできます：
@@ -281,6 +223,18 @@ DEBUG_PROMPT=true supabase functions serve analyze-image --no-verify-jwt
 - **OpenAI GPT**: `AI_PROVIDER=openai`
   - モデル: `gpt-4o-mini`
   - APIキー: `OPENAI_API_KEY`または`AI_OPENAI_API_KEY`
+
+詳細は上記「1. 環境変数の設定」を参照してください。
+
+## プロンプトの確認方法
+
+プロンプトの内容を確認したい場合は、環境変数`DEBUG_PROMPT=true`を設定してください：
+
+```bash
+DEBUG_PROMPT=true supabase functions serve analyze-image --no-verify-jwt --env-file .env
+```
+
+これにより、プロンプトの全文がログに出力されます。
 
 ## 注意事項
 
